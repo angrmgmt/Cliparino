@@ -1,0 +1,50 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>sb_vids</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="obj\**" />
+    <Compile Remove="Webpage\**" />
+    <EmbeddedResource Remove="obj\**" />
+    <EmbeddedResource Remove="Webpage\**" />
+    <None Remove="obj\**" />
+    <None Remove="Webpage\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="playClip.cs" />
+    <Compile Remove="shoutOut.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="TextInput.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Streamer.bot.Plugin.Interface">
+      <HintPath>..\..\..\..\..\Software\My Programs\Entertainment\Streamer.bot-x64-0.2.2\Streamer.bot.Plugin.Interface.dll</HintPath>
+    </Reference>
+    <Reference Include="Twitch.Common">
+      <HintPath>..\..\..\..\..\Software\My Programs\Entertainment\Streamer.bot-x64-0.2.2\Twitch.Common.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <EditorConfigFiles Remove="S:\OneDrive\Documents\Repositories\sb-vids\sb-vids\.editorconfig" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="S:\OneDrive\Documents\Repositories\sb-vids\sb-vids\.editorconfig" />
+  </ItemGroup>
+
+</Project>
