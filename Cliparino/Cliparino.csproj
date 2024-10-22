@@ -1,26 +1,42 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+
     <PropertyGroup>
         <OutputType>Exe</OutputType>
-        <TargetFramework>net8.0</TargetFramework>
+        <TargetFramework>net472</TargetFramework>
         <RootNamespace>Cliparino</RootNamespace>
         <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
+        <LangVersion>latest</LangVersion>
+        <NoWarn>CS0114</NoWarn> <!-- Ignore CS0114 errors -->
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+        <!-- Include all DLLs in a specific directory in the build output -->
+        <Reference Include="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.dll"/>
+        <Reference Include="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.Core.dll"/>
+        <Reference Include="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.Net.dll"/>
+        <Reference Include="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.Net.Http.dll"/>
+        <Reference Include="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\netstandard.dll"/>
+        <Reference Include="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.Windows.Forms.dll"/>
+        <Reference Include="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.Drawing.dll"/>
+        <Reference Include="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\Microsoft.VisualBasic.dll"/>
+        <!-- List of dlls included with Streamer.bot -->
+        <Reference Include="S:\OneDrive\Documents\Miscellaneous\Streaming\Streamer.bot\References\Streamer.bot.Plugin.Interface.dll"/>
+        <Reference Include="S:\OneDrive\Documents\Miscellaneous\Streaming\Streamer.bot\References\Streamer.bot.Common.dll"/>
+        <Reference Include="S:\OneDrive\Documents\Miscellaneous\Streaming\Streamer.bot\References\Streamer.bot.Auth.dll"/>
+        <Reference Include="S:\OneDrive\Documents\Miscellaneous\Streaming\Streamer.bot\References\Streamer.bot.EmoteHandlers.dll"/>
+        <Reference Include="S:\OneDrive\Documents\Miscellaneous\Streaming\Streamer.bot\References\NAudio.dll"/>
+        <Reference Include="S:\OneDrive\Documents\Miscellaneous\Streaming\Streamer.bot\References\NAudio.Core.dll"/>
+        <Reference Include="S:\OneDrive\Documents\Miscellaneous\Streaming\Streamer.bot\References\Newtonsoft.Json.dll"/>
+        <Reference Include="S:\OneDrive\Documents\Miscellaneous\Streaming\Streamer.bot\References\Twitch.Common.dll"/>
+        <Reference Include="S:\OneDrive\Documents\Miscellaneous\Streaming\Streamer.bot\References\websocket-sharp.dll"/>
     </ItemGroup>
 
     <ItemGroup>
-        <Reference Include="Streamer.bot.Plugin.Interface">
-            <HintPath>..\..\..\..\..\Software\My Programs\Entertainment\Streamer.bot-x64-0.2.2\Streamer.bot.Plugin.Interface.dll</HintPath>
-        </Reference>
-        <Reference Include="Twitch.Common">
-            <HintPath>..\..\..\..\..\Software\My Programs\Entertainment\Streamer.bot-x64-0.2.2\Twitch.Common.dll</HintPath>
-        </Reference>
+        <None Include="S:\OneDrive\Documents\Repositories\Cliparino\Cliparino\.editorconfig"/>
     </ItemGroup>
 
     <ItemGroup>
-        <None Include="S:\OneDrive\Documents\Repositories\sb-vids\sb-vids\.editorconfig" />
+        <Compile Remove="CPH.cs"/>
     </ItemGroup>
+
 </Project>

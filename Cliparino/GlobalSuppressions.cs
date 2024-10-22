@@ -3,7 +3,16 @@
 // Project-level suppressions either have no target or are given
 // a specific target and scoped to a namespace, type, member, etc.
 
+#region
+
 using System.Diagnostics.CodeAnalysis;
+
+using Streamer.bot.Common.Events;
+using Streamer.bot.Plugin.Interface;
+using Streamer.bot.Plugin.Interface.Enums;
+using Streamer.bot.Plugin.Interface.Model;
+
+#endregion
 
 [assembly:
     SuppressMessage("Design",

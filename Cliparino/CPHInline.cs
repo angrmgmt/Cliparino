@@ -1,8 +1,22 @@
-﻿using System.Drawing;
+﻿#region Usings
+
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.Drawing;
+using System.Linq;
+using System.Net.Http;
+
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+
+using Streamer.bot.Common.Events;
+using Streamer.bot.Plugin.Interface;
+using Streamer.bot.Plugin.Interface.Enums;
 using Streamer.bot.Plugin.Interface.Model;
+
 using Twitch.Common.Models.Api;
+
+#endregion
 
 /// <summary>
 ///     Specifies the severity level of a log message.
@@ -25,21 +39,18 @@ public enum LogLevel {
 }
 
 /// <summary>
-///     Provides methods for logging messages with various log levels.
-/// </summary>
-public interface ILogger {
-    void Log(string message, LogLevel level);
-}
-
-/// <summary>
 ///     The canonical primary class used in all Streamer.bot scripts.
 ///     This instance of the class is used to implement a clip player.
 /// </summary>
-public class CPHInline {
+[SuppressMessage("ReSharper", "MemberCanBeMadeStatic.Local")]
+[SuppressMessage("Performance", "CA1822:Mark members as static")]
+[SuppressMessage("ReSharper", "UseIndexFromEndExpression")]
+[SuppressMessage("ReSharper", "ArrangeThisQualifier")]
+public class CPHInline : CPHInlineBase {
     /// <summary>
     ///     Gets or sets the current clip.
     /// </summary>
-    private ClipData? CurrentClip { get; set; }
+    private ClipData CurrentClip { get; set; }
 
     /// <summary>
     ///     Gets or sets the clip player scene's dimensions (height and width).
@@ -49,7 +60,18 @@ public class CPHInline {
     /// <summary>
     ///     Gets or sets the last played clip.
     /// </summary>
-    private ClipData? LastPlayedClip { get; set; }
+    private ClipData LastPlayedClip { get; set; }
+
+    /// <summary>
+    ///     Initializes the CPHInline instance.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    ///     Thrown if <see cref="IInlineInvokeProxy" /> <see cref="CPHInlineBase.CPH" /> has not been initialized.
+    /// </exception>
+    public void Init() {
+        var cph = CPH ?? throw new InvalidOperationException("base.CPH must not be null in derived CPHInline.");
+        CPHStore.Init(cph);
+    }
 
     /// <summary>
     ///     The canonical Streamer.bot entry function in CPHInline. Executes the main command handler.
@@ -58,11 +80,11 @@ public class CPHInline {
     ///     True if the command was handled successfully; otherwise, false.
     /// </returns>
     public bool Execute() {
-        OBSManager.Logger.Log("Execute method called", LogLevel.Info);
+        Logger.Log("Execute method called", LogLevel.Info);
 
         try {
             if (!TryParseArguments(out var mainCommand, out var input0, out var height, out var width)) {
-                OBSManager.Logger.Log("Failed to parse arguments", LogLevel.Error);
+                Logger.Log("Failed to parse arguments", LogLevel.Error);
 
                 return false;
             }
@@ -78,7 +100,7 @@ public class CPHInline {
 
             return HandleCommand(mainCommand, input0);
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Unhandled exception: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception occurred in Execute: {ex.Message}", LogLevel.Error);
 
             return false;
         }
@@ -91,16 +113,16 @@ public class CPHInline {
     ///     The calculated delay in milliseconds.
     /// </returns>
     private int CalculateDelay() {
-        OBSManager.Logger.Log("CalculateDelay method called", LogLevel.Info);
+        Logger.Log("CalculateDelay method called", LogLevel.Info);
 
         try {
             var duration = CurrentClip?.Duration ?? GetMaxClipDuration() * 1000;
 
-            OBSManager.Logger.Log($"Calculated duration: {duration}", LogLevel.Info);
+            Logger.Log($"Calculated duration: {duration}", LogLevel.Info);
 
             return 2000 + (int)Math.Round(duration) * 1000;
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in CalculateDelay: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in CalculateDelay: {ex.Message}", LogLevel.Error);
 
             return -1;
         }
@@ -117,25 +139,25 @@ public class CPHInline {
     ///     The converted ClipData object.
     /// </returns>
     private ClipData ConvertToClipData(JObject clipJObject) {
-        OBSManager.Logger.Log("ConvertToClipData method called", LogLevel.Info);
-        OBSManager.Logger.Log("Creating new JObject clipData from clipJObject[\"data\"]", LogLevel.Info);
+        Logger.Log("ConvertToClipData method called", LogLevel.Info);
+        Logger.Log("Creating new JObject clipData from clipJObject[\"data\"]", LogLevel.Info);
 
         try {
             var clipDataToken = clipJObject["data"];
 
             if (clipDataToken == null) {
-                OBSManager.Logger.Log("clipJObject[\"data\"] is null.", LogLevel.Error);
+                Logger.Log("clipJObject[\"data\"] is null.", LogLevel.Error);
 
                 return new ClipData();
             }
 
-            OBSManager.Logger.Log("Creating new ClipData object clipData from JToken? clipDataToken", LogLevel.Info);
+            Logger.Log("Creating new ClipData object clipData from JToken? clipDataToken", LogLevel.Info);
 
             var clipData = ExtractClipData(clipDataToken);
 
             return CreateClipData(clipData);
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception occurred in ConvertToClipData: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception occurred in ConvertToClipData: {ex.Message}", LogLevel.Error);
 
             return new ClipData();
         }
@@ -151,7 +173,7 @@ public class CPHInline {
     ///     The created ClipData object.
     /// </returns>
     private ClipData CreateClipData(JObject clipData) {
-        OBSManager.Logger.Log("CreateClipData method called", LogLevel.Info);
+        Logger.Log("CreateClipData method called", LogLevel.Info);
 
         try {
             return new ClipData {
@@ -173,7 +195,7 @@ public class CPHInline {
                 IsFeatured = clipData["is_featured"]?.ToObject<bool>() ?? false
             };
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in CreateClipData: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in CreateClipData: {ex.Message}", LogLevel.Error);
 
             return new ClipData();
         }
@@ -189,7 +211,7 @@ public class CPHInline {
     ///     The extracted JObject representing the clip data.
     /// </returns>
     private JObject ExtractClipData(JToken clipDataToken) {
-        OBSManager.Logger.Log("ExtractClipData method called", LogLevel.Info);
+        Logger.Log("ExtractClipData method called", LogLevel.Info);
 
         try {
             var result = clipDataToken switch {
@@ -199,12 +221,12 @@ public class CPHInline {
             };
 
             if (result is null) {
-                OBSManager.Logger.Log("clipDataToken did not match any expected types.", LogLevel.Warn);
+                Logger.Log("clipDataToken did not match any expected types.", LogLevel.Warn);
             }
 
             return result ?? new JObject();
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in ExtractClipData: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in ExtractClipData: {ex.Message}", LogLevel.Error);
 
             return new JObject();
         }
@@ -220,14 +242,14 @@ public class CPHInline {
     ///     The found ClipData object.
     /// </returns>
     private ClipData FindSpecificClip(string apiURL) {
-        OBSManager.Logger.Log("FindSpecificClip method called", LogLevel.Info);
+        Logger.Log("FindSpecificClip method called", LogLevel.Info);
 
         try {
             var clip = GetClip(apiURL);
 
             return clip;
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in FindSpecificClip: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in FindSpecificClip: {ex.Message}", LogLevel.Error);
 
             return new ClipData();
         }
@@ -240,7 +262,7 @@ public class CPHInline {
     ///     The generated embed URL.
     /// </returns>
     private string GenerateClipEmbedUrl() {
-        OBSManager.Logger.Log("GenerateClipEmbedUrl method called", LogLevel.Info);
+        Logger.Log("GenerateClipEmbedUrl method called", LogLevel.Info);
 
         try {
             var embedUrl = CurrentClip != null ? CurrentClip.EmbedUrl : LastPlayedClip?.EmbedUrl;
@@ -249,9 +271,9 @@ public class CPHInline {
                 return $"{embedUrl}{GenerateQueryParams()}";
             }
 
-            OBSManager.Logger.Log("Embed URL is empty.", LogLevel.Error);
+            Logger.Log("Embed URL is empty.", LogLevel.Error);
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in GenerateClipEmbedUrl: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in GenerateClipEmbedUrl: {ex.Message}", LogLevel.Error);
         }
 
         return "about:blank";
@@ -267,7 +289,7 @@ public class CPHInline {
     ///     The generated Helix API URL.
     /// </returns>
     private string GenerateHelixURL(string clipURL) {
-        OBSManager.Logger.Log("GenerateHelixURL method called", LogLevel.Info);
+        Logger.Log("GenerateHelixURL method called", LogLevel.Info);
 
         try {
             string[] clipIDs;
@@ -280,7 +302,7 @@ public class CPHInline {
                 clipIDs = clipURL.Split('/');
                 clipID = clipIDs[clipIDs.Length - 1];
             } else {
-                OBSManager.Logger.Log("Invalid clip URL format.", LogLevel.Error);
+                Logger.Log("Invalid clip URL format.", LogLevel.Error);
 
                 return string.Empty;
             }
@@ -288,11 +310,11 @@ public class CPHInline {
             var helixURL = $"https://api.twitch.tv/helix/clips?id={clipID}";
             var message = $"Helix URL generated as: {helixURL}";
 
-            OBSManager.Logger.Log(message, LogLevel.Info);
+            Logger.Log(message, LogLevel.Info);
 
             return helixURL;
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in GenerateHelixURL: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in GenerateHelixURL: {ex.Message}", LogLevel.Error);
 
             return string.Empty;
         }
@@ -305,16 +327,16 @@ public class CPHInline {
     ///     The generated query parameters.
     /// </returns>
     private string GenerateQueryParams() {
-        OBSManager.Logger.Log("GenerateQueryParams method called", LogLevel.Info);
+        Logger.Log("GenerateQueryParams method called", LogLevel.Info);
 
         try {
             var queryParams =
                 $"?allowfullscreen&autoplay=true&controls=false&height={Dimensions.height}&mute=false&parent=localhost&preload&width={Dimensions.width}";
-            OBSManager.Logger.Log($"Generated query parameters: {queryParams}", LogLevel.Info);
+            Logger.Log($"Generated query parameters: {queryParams}", LogLevel.Info);
 
             return queryParams;
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in GenerateQueryParams: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in GenerateQueryParams: {ex.Message}", LogLevel.Error);
 
             return string.Empty;
         }
@@ -330,31 +352,31 @@ public class CPHInline {
     ///     True if a clip was found and played; otherwise, false.
     /// </returns>
     private bool GetAndPlayClipForChannel(TwitchUserInfoEx userInfo) {
-        OBSManager.Logger.Log("GetAndPlayClipForChannel method called", LogLevel.Info);
+        Logger.Log("GetAndPlayClipForChannel method called", LogLevel.Info);
 
         try {
             var clips = GetClips(userInfo.UserId, userInfo.UserName);
 
-            OBSManager.Logger.Log($"Fetched {clips.Count} clips for user {userInfo.UserName}", LogLevel.Info);
+            Logger.Log($"Fetched {clips.Count} clips for user {userInfo.UserName}", LogLevel.Info);
 
             if (CPH.TryGetArg("featuredOnly", out bool featuredOnly) && featuredOnly) {
-                OBSManager.Logger.Log("Filtering clips to include only featured ones", LogLevel.Info);
+                Logger.Log("Filtering clips to include only featured ones", LogLevel.Info);
                 clips = clips.Where(clip => clip.IsFeatured).ToList();
             }
 
             if (clips.Count != 0) {
-                OBSManager.Logger.Log("Playing a random clip", LogLevel.Info);
+                Logger.Log("Playing a random clip", LogLevel.Info);
                 PlayRandomClip(clips);
 
                 return true;
             }
 
-            OBSManager.Logger.Log("No clips found to play", LogLevel.Warn);
+            Logger.Log("No clips found to play", LogLevel.Warn);
             CPH.SendMessage($"Well, looks like @{userInfo.UserName} doesn't have any clips... yet. Let's love on them a bit and maybe even tickle that follow anyway!! https://twitch.tv/{userInfo.UserName}");
 
             return false;
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in GetAndPlayClipForChannel: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in GetAndPlayClipForChannel: {ex.Message}", LogLevel.Error);
 
             return false;
         }
@@ -370,7 +392,7 @@ public class CPHInline {
     ///     The fetched ClipData object.
     /// </returns>
     private ClipData GetClip(string apiUrl) {
-        OBSManager.Logger.Log("GetClip method called", LogLevel.Info);
+        Logger.Log("GetClip method called", LogLevel.Info);
 
         var clientId = CPH.TwitchClientId;
         var accessToken = CPH.TwitchOAuthToken;
@@ -381,8 +403,8 @@ public class CPHInline {
 
             request.Headers.Add("Client-Id", clientId);
             request.Headers.Add("Authorization", $"Bearer {accessToken}");
-            OBSManager.Logger.Log($"Making HTTP request with API URL {apiUrl}", LogLevel.Info);
-            OBSManager.Logger.Log($"Headers for request: {request.Headers}", LogLevel.Info);
+            Logger.Log($"Making HTTP request with API URL {apiUrl}", LogLevel.Info);
+            Logger.Log($"Headers for request: {request.Headers}", LogLevel.Info);
 
             var response = client.SendAsync(request).Result;
 
@@ -392,14 +414,14 @@ public class CPHInline {
                 return new ClipData();
             }
 
-            OBSManager.Logger.Log("CLIPS Request successful.", LogLevel.Info);
-            OBSManager.Logger.Log($"Response - Status Code: {response.StatusCode.ToString()}", LogLevel.Info);
-            OBSManager.Logger.Log($"Response - Reason Phrase: {response.ReasonPhrase}", LogLevel.Info);
-            OBSManager.Logger.Log($"Response - Headers: {response.Headers}", LogLevel.Info);
+            Logger.Log("CLIPS Request successful.", LogLevel.Info);
+            Logger.Log($"Response - Status Code: {response.StatusCode.ToString()}", LogLevel.Info);
+            Logger.Log($"Response - Reason Phrase: {response.ReasonPhrase}", LogLevel.Info);
+            Logger.Log($"Response - Headers: {response.Headers}", LogLevel.Info);
 
             var responseBody = response.Content.ReadAsStringAsync().Result;
 
-            OBSManager.Logger.Log($"Response - Body: {responseBody}", LogLevel.Info);
+            Logger.Log($"Response - Body: {responseBody}", LogLevel.Info);
 
             var clip = ConvertToClipData(ParseClips(responseBody));
 
@@ -408,7 +430,7 @@ public class CPHInline {
 
             return clip;
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in GetClip: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in GetClip: {ex.Message}", LogLevel.Error);
 
             return new ClipData();
         }
@@ -426,8 +448,8 @@ public class CPHInline {
     /// <returns>
     ///     A list of ClipData objects.
     /// </returns>
-    private List<ClipData> GetClips(string? userId, string? userName) {
-        OBSManager.Logger.Log("GetClips method called", LogLevel.Info);
+    private List<ClipData> GetClips(string userId, string userName) {
+        Logger.Log("GetClips method called", LogLevel.Info);
 
         var timeSpans = new List<TimeSpan> {
             TimeSpan.Zero,
@@ -449,7 +471,7 @@ public class CPHInline {
                 LogNoClipsMessage(userName, timeSpan);
             }
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in GetClips: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in GetClips: {ex.Message}", LogLevel.Error);
         }
 
         return [];
@@ -462,18 +484,18 @@ public class CPHInline {
     ///     The maximum clip duration in seconds.
     /// </returns>
     private int GetMaxClipDuration() {
-        OBSManager.Logger.Log("GetMaxClipDuration method called", LogLevel.Info);
+        Logger.Log("GetMaxClipDuration method called", LogLevel.Info);
 
         try {
-            return CPH.TryGetArg("maxClipSeconds", out string? maxClipDurationStr)
+            return CPH.TryGetArg("maxClipSeconds", out string maxClipDurationStr)
                        ? int.Parse(maxClipDurationStr ?? "30")
                        : 30;
         } catch (FormatException ex) {
-            OBSManager.Logger.Log($"Failed to parse maxClipSeconds argument: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Failed to parse maxClipSeconds argument: {ex.Message}", LogLevel.Error);
 
             return 30;
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Unexpected error in GetMaxClipDuration: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Unexpected error in GetMaxClipDuration: {ex.Message}", LogLevel.Error);
 
             return 30;
         }
@@ -486,7 +508,7 @@ public class CPHInline {
     ///     The most recent clip URL.
     /// </returns>
     private string GetMostRecentClipUrlFromChat() {
-        OBSManager.Logger.Log("GetMostRecentClipUrlFromChat method called", LogLevel.Info);
+        Logger.Log("GetMostRecentClipUrlFromChat method called", LogLevel.Info);
 
         try {
             var clipUrl = CPH.GetGlobalVar<string>("last_clip_url");
@@ -495,11 +517,11 @@ public class CPHInline {
                 return clipUrl;
             }
 
-            OBSManager.Logger.Log("No clip URL found in global variables.", LogLevel.Warn);
+            Logger.Log("No clip URL found in global variables.", LogLevel.Warn);
 
             return string.Empty;
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in GetMostRecentClipUrlFromChat: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in GetMostRecentClipUrlFromChat: {ex.Message}", LogLevel.Error);
 
             return string.Empty;
         }
@@ -518,7 +540,7 @@ public class CPHInline {
     ///     True if the command was handled successfully; otherwise, false.
     /// </returns>
     private bool HandleCommand(string command, string input) {
-        OBSManager.Logger.Log("HandleCommand method called", LogLevel.Info);
+        Logger.Log("HandleCommand method called", LogLevel.Info);
 
         try {
             var commandHandlers = new Dictionary<string, Func<string, bool>>(StringComparer.OrdinalIgnoreCase) {
@@ -532,11 +554,11 @@ public class CPHInline {
                 return handler(input);
             }
 
-            OBSManager.Logger.Log($"Unknown command: {command}", LogLevel.Warn);
+            Logger.Log($"Unknown command: {command}", LogLevel.Warn);
 
             return false;
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in HandleCommand: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in HandleCommand: {ex.Message}", LogLevel.Error);
 
             return false;
         }
@@ -549,12 +571,12 @@ public class CPHInline {
     ///     True if the replay was successful; otherwise, false.
     /// </returns>
     private bool HandleReplayCommand() {
-        OBSManager.Logger.Log("HandleReplayCommand method called", LogLevel.Info);
+        Logger.Log("HandleReplayCommand method called", LogLevel.Info);
 
         try {
             return ReplayLastClip();
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in HandleReplayCommand: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in HandleReplayCommand: {ex.Message}", LogLevel.Error);
 
             return false;
         }
@@ -570,29 +592,29 @@ public class CPHInline {
     ///     True if the shoutout was successful; otherwise, false.
     /// </returns>
     private bool HandleShoutoutCommand(string channelName) {
-        OBSManager.Logger.Log("HandleShoutoutCommand method called", LogLevel.Info);
+        Logger.Log("HandleShoutoutCommand method called", LogLevel.Info);
 
         try {
             if (string.IsNullOrEmpty(channelName)) {
-                OBSManager.Logger.Log("Channel name is empty or null.", LogLevel.Error);
+                Logger.Log("Channel name is empty or null.", LogLevel.Error);
 
                 return false;
             }
 
             if (!TryGetUserInfo(channelName, out var userInfo)) {
-                OBSManager.Logger.Log($"Failed to get user info for channel: {channelName}", LogLevel.Error);
+                Logger.Log($"Failed to get user info for channel: {channelName}", LogLevel.Error);
 
                 return false;
             }
 
             var message = PrepareMessage(userInfo);
 
-            OBSManager.Logger.Log($"Shoutout message prepared: {message}", LogLevel.Info);
+            Logger.Log($"Shoutout message prepared: {message}", LogLevel.Info);
             CPH.SendMessage(message);
 
             return GetAndPlayClipForChannel(userInfo);
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in HandleShoutoutCommand: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in HandleShoutoutCommand: {ex.Message}", LogLevel.Error);
 
             return false;
         }
@@ -605,12 +627,12 @@ public class CPHInline {
     ///     True if the stop command was successful; otherwise, false.
     /// </returns>
     private bool HandleStopCommand() {
-        OBSManager.Logger.Log("HandleStopCommand method called", LogLevel.Info);
+        Logger.Log("HandleStopCommand method called", LogLevel.Info);
 
         try {
             return StopClipPlayer();
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in HandleStopCommand: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in HandleStopCommand: {ex.Message}", LogLevel.Error);
 
             return false;
         }
@@ -626,14 +648,14 @@ public class CPHInline {
     ///     True if the watch command was successful; otherwise, false.
     /// </returns>
     private bool HandleWatchCommand(string urlOrEmpty) {
-        OBSManager.Logger.Log("HandleWatchCommand method called", LogLevel.Info);
+        Logger.Log("HandleWatchCommand method called", LogLevel.Info);
 
         try {
             if (string.IsNullOrEmpty(urlOrEmpty)) {
                 var recentClipUrl = GetMostRecentClipUrlFromChat();
 
                 if (string.IsNullOrEmpty(recentClipUrl)) {
-                    OBSManager.Logger.Log("No recent clip URL found in chat.", LogLevel.Warn);
+                    Logger.Log("No recent clip URL found in chat.", LogLevel.Warn);
 
                     return false;
                 }
@@ -645,7 +667,7 @@ public class CPHInline {
 
             return true;
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in HandleWatchCommand: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in HandleWatchCommand: {ex.Message}", LogLevel.Error);
 
             return false;
         }
@@ -658,24 +680,24 @@ public class CPHInline {
     ///     The ClipData object to log.
     /// </param>
     private void LogClipData(ClipData clipData) {
-        OBSManager.Logger.Log("LogClipData method called", LogLevel.Info);
-        OBSManager.Logger.Log(clipData.ToString() ?? string.Empty, LogLevel.Info);
-        OBSManager.Logger.Log($"Id = {clipData.Id}", LogLevel.Info);
-        OBSManager.Logger.Log($"Url = {clipData.Url}", LogLevel.Info);
-        OBSManager.Logger.Log($"EmbedUrl = {clipData.EmbedUrl}", LogLevel.Info);
-        OBSManager.Logger.Log($"BroadcasterId = {clipData.BroadcasterId}", LogLevel.Info);
-        OBSManager.Logger.Log($"BroadcasterName = {clipData.BroadcasterName}", LogLevel.Info);
-        OBSManager.Logger.Log($"CreatorId = {clipData.CreatorId}", LogLevel.Info);
-        OBSManager.Logger.Log($"CreatorName = {clipData.CreatorName}", LogLevel.Info);
-        OBSManager.Logger.Log($"VideoId = {clipData.VideoId}", LogLevel.Info);
-        OBSManager.Logger.Log($"GameId = {clipData.GameId}", LogLevel.Info);
-        OBSManager.Logger.Log($"Language = {clipData.Language}", LogLevel.Info);
-        OBSManager.Logger.Log($"Title = {clipData.Title}", LogLevel.Info);
-        OBSManager.Logger.Log($"ViewCount = {clipData.ViewCount}", LogLevel.Info);
-        OBSManager.Logger.Log($"CreatedAt = {clipData.CreatedAt}", LogLevel.Info);
-        OBSManager.Logger.Log($"ThumbnailUrl = {clipData.ThumbnailUrl}", LogLevel.Info);
-        OBSManager.Logger.Log($"Duration = {clipData.Duration}", LogLevel.Info);
-        OBSManager.Logger.Log($"IsFeatured = {clipData.IsFeatured}", LogLevel.Info);
+        Logger.Log("LogClipData method called", LogLevel.Info);
+        Logger.Log(clipData.ToString(), LogLevel.Info);
+        Logger.Log($"Id = {clipData.Id}", LogLevel.Info);
+        Logger.Log($"Url = {clipData.Url}", LogLevel.Info);
+        Logger.Log($"EmbedUrl = {clipData.EmbedUrl}", LogLevel.Info);
+        Logger.Log($"BroadcasterId = {clipData.BroadcasterId}", LogLevel.Info);
+        Logger.Log($"BroadcasterName = {clipData.BroadcasterName}", LogLevel.Info);
+        Logger.Log($"CreatorId = {clipData.CreatorId}", LogLevel.Info);
+        Logger.Log($"CreatorName = {clipData.CreatorName}", LogLevel.Info);
+        Logger.Log($"VideoId = {clipData.VideoId}", LogLevel.Info);
+        Logger.Log($"GameId = {clipData.GameId}", LogLevel.Info);
+        Logger.Log($"Language = {clipData.Language}", LogLevel.Info);
+        Logger.Log($"Title = {clipData.Title}", LogLevel.Info);
+        Logger.Log($"ViewCount = {clipData.ViewCount}", LogLevel.Info);
+        Logger.Log($"CreatedAt = {clipData.CreatedAt}", LogLevel.Info);
+        Logger.Log($"ThumbnailUrl = {clipData.ThumbnailUrl}", LogLevel.Info);
+        Logger.Log($"Duration = {clipData.Duration}", LogLevel.Info);
+        Logger.Log($"IsFeatured = {clipData.IsFeatured}", LogLevel.Info);
     }
 
     /// <summary>
@@ -686,14 +708,14 @@ public class CPHInline {
     /// </param>
     private void LogClipRequestError(HttpResponseMessage response) {
         try {
-            OBSManager.Logger.Log("LogClipRequestError method called", LogLevel.Info);
-            OBSManager.Logger.Log($"CLIPS Request failed with status code: {response.StatusCode}", LogLevel.Error);
+            Logger.Log("LogClipRequestError method called", LogLevel.Info);
+            Logger.Log($"CLIPS Request failed with status code: {response.StatusCode}", LogLevel.Error);
 
             var errorMessage = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
 
-            OBSManager.Logger.Log($"CLIPS Error Message: {errorMessage}", LogLevel.Error);
+            Logger.Log($"CLIPS Error Message: {errorMessage}", LogLevel.Error);
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception occurred while logging clip request error: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception occurred in LogClipRequestError: {ex.Message}", LogLevel.Error);
         }
     }
 
@@ -707,17 +729,17 @@ public class CPHInline {
     /// <param name="timeSpan">
     ///     The range of creation dates over which clips are to be selected.
     /// </param>
-    private void LogNoClipsMessage(string? userName, TimeSpan timeSpan) {
-        OBSManager.Logger.Log("LogNoClipsMessage method called", LogLevel.Info);
+    private void LogNoClipsMessage(string userName, TimeSpan timeSpan) {
+        Logger.Log("LogNoClipsMessage method called", LogLevel.Info);
 
         try {
             var message = timeSpan == TimeSpan.Zero
                               ? $"{userName} has no featured clips, pulling from last 24 hours."
                               : $"{userName} has no clips from the last {timeSpan.TotalDays} days, pulling from next period.";
 
-            OBSManager.Logger.Log($"Message: {message}", LogLevel.Info);
+            Logger.Log($"Message: {message}", LogLevel.Info);
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in LogNoClipsMessage: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in LogNoClipsMessage: {ex.Message}", LogLevel.Error);
         }
     }
 
@@ -731,12 +753,12 @@ public class CPHInline {
     ///     The parsed JObject representing the clips' data.
     /// </returns>
     private JObject ParseClips(string clipDataText) {
-        OBSManager.Logger.Log("ParseClips method called", LogLevel.Info);
+        Logger.Log("ParseClips method called", LogLevel.Info);
 
         try {
             return JObject.Parse(clipDataText);
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Error parsing clip data: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Error parsing clip data: {ex.Message}", LogLevel.Error);
 
             return new JObject();
         }
@@ -750,7 +772,7 @@ public class CPHInline {
     ///     The clip data for the clip to be played.
     /// </param>
     private void PlayClip(ClipData clip) {
-        OBSManager.Logger.Log("PlayClip method called", LogLevel.Info);
+        Logger.Log("PlayClip method called", LogLevel.Info);
 
         try {
             const string clipInfoText = "Clip Info";
@@ -758,7 +780,7 @@ public class CPHInline {
             var delay = CalculateDelay();
 
             if (delay == -1) {
-                OBSManager.Logger.Log("Error calculating delay for clip playback", LogLevel.Error);
+                Logger.Log("Error calculating delay for clip playback", LogLevel.Error);
 
                 return;
             }
@@ -773,9 +795,9 @@ public class CPHInline {
                                                (s, s1) => CPH.ObsShowSource(s, s1),
                                                (s, s1) => CPH.ObsHideSource(s, s1));
             LastPlayedClip = clip;
-            OBSManager.Logger.Log("Clip played successfully", LogLevel.Info);
+            Logger.Log("Clip played successfully", LogLevel.Info);
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in PlayClip: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in PlayClip: {ex.Message}", LogLevel.Error);
         }
     }
 
@@ -786,7 +808,7 @@ public class CPHInline {
     ///     A list of clip data from which a random clip will be selected and played.
     /// </param>
     private void PlayRandomClip(List<ClipData> clips) {
-        OBSManager.Logger.Log("PlayRandomClip method called", LogLevel.Info);
+        Logger.Log("PlayRandomClip method called", LogLevel.Info);
 
         try {
             var random = new Random();
@@ -794,9 +816,9 @@ public class CPHInline {
 
             CurrentClip = clip;
             PlayClip(clip);
-            OBSManager.Logger.Log("Random clip played successfully", LogLevel.Info);
+            Logger.Log("Random clip played successfully", LogLevel.Info);
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"An error occurred while playing a random clip: {ex.Message}", LogLevel.Error);
+            Logger.Log($"An error occurred while playing a random clip: {ex.Message}", LogLevel.Error);
         }
     }
 
@@ -809,7 +831,7 @@ public class CPHInline {
     ///     The URL of the clip to be played.
     /// </param>
     private void PlaySpecificClip(string clipURL) {
-        OBSManager.Logger.Log("PlaySpecificClip method called", LogLevel.Info);
+        Logger.Log("PlaySpecificClip method called", LogLevel.Info);
 
         try {
             var helixURL = GenerateHelixURL(clipURL);
@@ -819,7 +841,7 @@ public class CPHInline {
             PlayClip(specificClip);
             LastPlayedClip = specificClip;
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in PlaySpecificClip: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in PlaySpecificClip: {ex.Message}", LogLevel.Error);
         }
     }
 
@@ -833,21 +855,21 @@ public class CPHInline {
     ///     A string with the placeholders replaced by the user's information.
     /// </returns>
     private string PrepareMessage(TwitchUserInfoEx userInfo) {
-        OBSManager.Logger.Log("PrepareMessage method called", LogLevel.Info);
+        Logger.Log("PrepareMessage method called", LogLevel.Info);
 
         try {
             if (!CPH.TryGetArg("message", out string message)) {
-                OBSManager.Logger.Log("Failed to retrieve 'message' argument.", LogLevel.Warn);
+                Logger.Log("Failed to retrieve 'message' argument.", LogLevel.Warn);
                 message = "Default message";
             }
 
             var preparedMessage = message.Replace("%userName%", userInfo.UserName).Replace("%userGame%", userInfo.Game);
 
-            OBSManager.Logger.Log($"Message prepared: {preparedMessage}", LogLevel.Info);
+            Logger.Log($"Message prepared: {preparedMessage}", LogLevel.Info);
 
             return preparedMessage;
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in PrepareMessage: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in PrepareMessage: {ex.Message}", LogLevel.Error);
 
             return string.Empty;
         }
@@ -861,11 +883,11 @@ public class CPHInline {
     ///     True if the last played clip was successfully replayed; otherwise, false.
     /// </returns>
     private bool ReplayLastClip() {
-        OBSManager.Logger.Log("ReplayLastClip method called", LogLevel.Info);
+        Logger.Log("ReplayLastClip method called", LogLevel.Info);
 
         try {
             if (LastPlayedClip == null) {
-                OBSManager.Logger.Log("No last played clip to replay.", LogLevel.Warn);
+                Logger.Log("No last played clip to replay.", LogLevel.Warn);
 
                 return false;
             }
@@ -875,7 +897,7 @@ public class CPHInline {
 
             return true;
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in ReplayLastClip: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in ReplayLastClip: {ex.Message}", LogLevel.Error);
 
             return false;
         }
@@ -889,16 +911,16 @@ public class CPHInline {
     ///     Returns <c>true</c> if the clip player was successfully stopped.
     /// </returns>
     private bool StopClipPlayer() {
-        OBSManager.Logger.Log("StopClipPlayer method called", LogLevel.Info);
+        Logger.Log("StopClipPlayer method called", LogLevel.Info);
 
         try {
             CPH.ObsHideSource(CPH.ObsGetCurrentScene(), OBSManager.SceneName);
             CPH.ObsSetBrowserSource(OBSManager.SceneName, OBSManager.PlayerSourceName, "about:blank");
-            OBSManager.Logger.Log("Clip player stopped.", LogLevel.Info);
+            Logger.Log("Clip player stopped.", LogLevel.Info);
 
             return true;
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Error stopping clip player: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Error stopping clip player: {ex.Message}", LogLevel.Error);
 
             return false;
         }
@@ -919,14 +941,14 @@ public class CPHInline {
     ///     <c>true</c> if the user information was successfully retrieved; otherwise, <c>false</c>.
     /// </returns>
     private bool TryGetUserInfo(string targetUser, out TwitchUserInfoEx userInfo) {
-        OBSManager.Logger.Log("TryGetUserInfo method called", LogLevel.Info);
+        Logger.Log("TryGetUserInfo method called", LogLevel.Info);
 
         try {
             userInfo = CPH.TwitchGetExtendedUserInfoByLogin(targetUser);
 
             return true;
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in TryGetUserInfo: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in TryGetUserInfo: {ex.Message}", LogLevel.Error);
             userInfo = new TwitchUserInfoEx();
 
             return false;
@@ -952,7 +974,7 @@ public class CPHInline {
     ///     <c>true</c> if all arguments were successfully parsed; otherwise, <c>false</c>.
     /// </returns>
     private bool TryParseArguments(out string mainCommand, out string input0, out int height, out int width) {
-        OBSManager.Logger.Log("TryParseArguments method called", LogLevel.Info);
+        Logger.Log("TryParseArguments method called", LogLevel.Info);
         mainCommand = string.Empty;
         input0 = string.Empty;
         height = 0;
@@ -964,7 +986,7 @@ public class CPHInline {
                    && CPH.TryGetArg("height", out height)
                    && CPH.TryGetArg("width", out width);
         } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in TryParseArguments: {ex.Message}", LogLevel.Error);
+            Logger.Log($"Exception in TryParseArguments: {ex.Message}", LogLevel.Error);
             mainCommand = string.Empty;
             input0 = string.Empty;
             height = 0;
@@ -973,79 +995,34 @@ public class CPHInline {
             return false;
         }
     }
+}
 
-    #region Pinhole Functions
+/// <summary>
+///     Provides methods to initialize and retrieve the stored CPH instance for inline invocation.
+/// </summary>
+public static class CPHStore {
+    private static IInlineInvokeProxy _cph;
 
     /// <summary>
-    ///     Logs an error message to the Streamer.bot logging system.
+    ///     Initializes the CPHInline instance.
     /// </summary>
-    /// <param name="message">The error message to log.</param>
-    public void LogError(string message) {
-        OBSManager.Logger.Log("LogError method called", LogLevel.Info);
-
-        try {
-            CPH.LogError(message);
-        } catch (Exception ex) {
-            // This may not work... but we can try.
-            OBSManager.Logger.Log($"Exception in LogError: {ex.Message}", LogLevel.Error);
-        }
+    public static void Init(IInlineInvokeProxy cph) {
+        _cph = cph ?? throw new ArgumentNullException(nameof(cph), "CPH instance must not be null.");
     }
 
     /// <summary>
-    ///     Logs an informational message.
+    ///     Retrieves the CPH instance stored in the CPHStore.
     /// </summary>
-    /// <param name="message">The message to log.</param>
-    public void LogInfo(string message) {
-        OBSManager.Logger.Log("LogInfo method called", LogLevel.Info);
-
-        try {
-            CPH.LogInfo(message);
-        } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in LogInfo: {ex.Message}", LogLevel.Error);
-        }
-    }
-
-    /// <summary>
-    ///     Logs a warning message to the Streamer.bot logging system.
-    /// </summary>
-    /// <param name="message">The warning message to log.</param>
-    public void LogWarn(string message) {
-        OBSManager.Logger.Log("LogWarn method called", LogLevel.Info);
-
-        try {
-            CPH.LogWarn(message);
-        } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in LogWarn: {ex.Message}", LogLevel.Error);
-        }
-    }
-
-    /// <summary>
-    ///     Attempts to retrieve the value of an argument by its name.
-    /// </summary>
-    /// <typeparam name="T">The type of the argument to retrieve.</typeparam>
-    /// <param name="argName">The name of the argument to retrieve.</param>
-    /// <param name="value">
-    ///     When this method returns, contains the value of the argument if the argument is found;
-    ///     otherwise, the default value for the type of the <paramref name="value" /> parameter.
-    ///     This parameter is passed uninitialized.
-    /// </param>
     /// <returns>
-    ///     <c>true</c> if the argument is found and successfully retrieved; otherwise, <c>false</c>.
+    ///     The <see cref="Streamer.bot.Plugin.Interface.IInlineInvokeProxy" /> stored in the CPHStore.
     /// </returns>
-    public bool TryGetArg<T>(string argName, out T? value) {
-        OBSManager.Logger.Log($"TryGetArg method called with argument name: {argName}", LogLevel.Info);
-
-        try {
-            return CPH.TryGetArg(argName, out value);
-        } catch (Exception ex) {
-            OBSManager.Logger.Log($"Exception in TryGetArg method: {ex.Message}", LogLevel.Error);
-            value = default;
-
-            return false;
-        }
+    /// <exception cref="InvalidOperationException">
+    ///     Thrown if the <see cref="IInlineInvokeProxy"/> has not been
+    ///     initialized.
+    /// </exception>
+    public static IInlineInvokeProxy GetCPH() {
+        return _cph ?? throw new InvalidOperationException("CPH instance has not been initialized.");
     }
-
-    #endregion Pinhole Functions
 }
 
 /// <summary>
@@ -1053,6 +1030,9 @@ public class CPHInline {
 ///     interoperability with Streamer.bot to implement a clip player.
 /// </summary>
 public static class OBSManager {
+    private const string OBSNotConnected = "OBS is not connected";
+    private const string ManageOBSCalled = "ManageOBS method called";
+
     /// <summary>
     ///     Gets the name of the clip player source.
     /// </summary>
@@ -1062,14 +1042,6 @@ public static class OBSManager {
     ///     Gets the name of the clip player scene.
     /// </summary>
     public const string SceneName = "Cliparino";
-
-    /// <summary>
-    ///     Gets the logger instance used for logging messages within the OBSManager.
-    /// </summary>
-    /// <value>
-    ///     An instance of <see cref="ILogger" /> used for logging.
-    /// </value>
-    public static ILogger Logger { get; } = DefaultLogger.CreateInstance();
 
     /// <summary>
     ///     Gets or sets the dimensions of the video, represented as a tuple containing height and width.
@@ -1216,14 +1188,14 @@ public static class OBSManager {
                                   Action<string, string, bool> obsSetSourceVisibility,
                                   Action<string> obsSetScene,
                                   string sceneName,
-                                  string? sourceName = null,
+                                  string sourceName = null,
                                   bool? visible = null,
                                   bool createIfNotExist = true) {
-        Logger.Log("ManageOBS method called", LogLevel.Info);
+        Logger.Log(ManageOBSCalled, LogLevel.Info);
 
         try {
             if (!obsIsConnected()) {
-                Logger.Log("OBS is not connected", LogLevel.Error);
+                Logger.Log(OBSNotConnected, LogLevel.Error);
 
                 return;
             }
@@ -1244,8 +1216,6 @@ public static class OBSManager {
                     Logger.Log($"Source '{sourceName}' does not exist in scene '{sceneName}', creating.",
                                LogLevel.Info);
                     ManagePlayerSourceInScene(sceneName, sourceName, obsSendRaw, wait);
-
-                    return;
                 }
 
                 if (!visible.HasValue) {
@@ -1280,7 +1250,10 @@ public static class OBSManager {
     ///     An action to wait for a specified duration.
     /// </param>
     /// <remarks>
-    ///     Sets browser source managed volume to 1/2 max SPL (-6 dB) and reroutes audio to monitoring.
+    ///     - Sets browser source managed volume to 1/2 max SPL (-6 dB) and sets both monitoring and output.
+    ///     - Using an inputSettings object with the property and value <c>reroute_audio = true</c> will cause both the
+    ///     browser source and Streamer.bot to crash for unsupported input items (e.g., <c>text_gdiplus_v3</c>).
+    ///     Verified via OBS Raw Generator.
     /// </remarks>
     private static void ManagePlayerSourceInScene(string sceneName,
                                                   string sourceName,
@@ -1307,7 +1280,8 @@ public static class OBSManager {
                 inputName = sourceName,
                 inputKind = "browser_source",
                 inputSettings,
-                sceneItemEnabled = true
+                sceneItemEnabled = true,
+                overlay = false
             };
             var setInputAudioMonitorTypeData = new {
                 inputName = sourceName, monitorType = "OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT"
@@ -1348,7 +1322,7 @@ public static class OBSManager {
 
         try {
             var textColor = ColorTranslator.FromHtml("#0071C5");
-            var backColor = ColorTranslator.FromHtml("#C55400");
+            var backColor = ColorTranslator.FromHtml("#0492FF");
             var outlineColor = Color.FromName("White");
             var inputSettings = new {
                 align = "left",
@@ -1357,11 +1331,11 @@ public static class OBSManager {
                 bk_opacity = 10,
                 chatlog = false,
                 chatlog_lines = 6,
-                color = textColor,
+                color = ColorTranslator.ToWin32(textColor),
                 extents = true,
                 extents_cx = 384,
                 extents_cy = 216,
-                extents_wrap = false,
+                extents_wrap = true,
                 font = new { face = "Open Sans", flags = "", size = 40, Style = "Regular" },
                 gradient = false,
                 gradient_color = 0,
@@ -1369,11 +1343,11 @@ public static class OBSManager {
                 gradient_opacity = 0,
                 opacity = 100,
                 outline = true,
-                outline_color = outlineColor,
+                outline_color = ColorTranslator.ToWin32(outlineColor),
                 outline_opacity = 100,
                 outline_size = 2,
                 text = $"{ChannelName}\n{ClipTitle}\nby {ClipCreator}",
-                transform = 3,
+                transform = 0,
                 valign = "center"
             };
             var createInputData = new {
@@ -1387,7 +1361,7 @@ public static class OBSManager {
                 alignment = 1,
                 boundsAlignment = 0,
                 boundsHeight = 216,
-                boundsType = "OBS_BOUNDS_NONE",
+                boundsType = "OBS_BOUNDS_SCALE_INNER",
                 boundsWidth = 384,
                 cropBottom = 0,
                 cropLeft = 0,
@@ -1410,18 +1384,18 @@ public static class OBSManager {
                            LogLevel.Info);
                 obsSendRaw("CreateInput", JsonConvert.SerializeObject(createInputData));
                 Logger.Log($"Text source '{sourceName}' created in scene: '{sceneName}'.", LogLevel.Info);
+
+                var itemID = obsSendRaw("GetSceneItemId",
+                                        JsonConvert.SerializeObject(new { sceneName, sourceName, searchOffset = 0 }));
+                var itemIndexData = new { sceneName, sceneItemId = itemID, sceneItemIndex = 1 };
+
+                wait(200);
+                obsSendRaw("SetSceneItemTransform", JsonConvert.SerializeObject(inputTransform));
+                obsSendRaw("SetSceneItemIndex", JsonConvert.SerializeObject(itemIndexData));
             } else {
                 Logger.Log($"Text source '{sourceName}' already exists in scene: {sceneName}.", LogLevel.Info);
                 obsSendRaw("SetInputSettings", JsonConvert.SerializeObject(inputSettings));
             }
-
-            var itemID = obsSendRaw("GetSceneItemId",
-                                    JsonConvert.SerializeObject(new { sceneName, sourceName, searchOffset = 0 }));
-            var itemIndexData = new { sceneName, sceneItemId = itemID, sceneItemIndex = 1 };
-
-            wait(200);
-            obsSendRaw("SetSceneItemTransform", JsonConvert.SerializeObject(inputTransform));
-            obsSendRaw("SetSceneItemIndex", JsonConvert.SerializeObject(itemIndexData));
         } catch (Exception ex) {
             Logger.Log($"Exception in ManageTextSourceInScene: {ex.Message}", LogLevel.Error);
         }
@@ -1508,7 +1482,7 @@ public static class OBSManager {
             var jsonResponse = JObject.Parse(sceneResponse);
             var scenes = jsonResponse["scenes"] as JArray;
             var sceneExists = scenes != null
-                              && scenes.Any(scene => string.Equals((string?)scene["sceneName"] ?? string.Empty,
+                              && scenes.Any(scene => string.Equals((string)scene["sceneName"] ?? string.Empty,
                                                                    sceneName,
                                                                    StringComparison.Ordinal));
             Logger.Log($"Scene '{sceneName}' exists: {sceneExists}", LogLevel.Info);
@@ -1562,7 +1536,7 @@ public static class OBSManager {
             var sceneItems = sceneItemJsonResponse["sceneItems"] as JArray;
 
             return sceneItems != null
-                   && sceneItems.Any(item => string.Equals((string?)item["sourceName"] ?? string.Empty,
+                   && sceneItems.Any(item => string.Equals((string)item["sourceName"] ?? string.Empty,
                                                            sourceName,
                                                            StringComparison.Ordinal));
         } catch (Exception ex) {
@@ -1592,42 +1566,26 @@ public static class OBSManager {
 }
 
 /// <summary>
-///     Wrapper class implementing the <see cref="ILogger" /> interface to handle user selection of logging.
+///     Wrapper class built to handle user selection of logging.
 /// </summary>
-public class DefaultLogger : ILogger {
-    private readonly CPHInline _cphInline;
-    private bool? _logging;
-
-    /// <summary>
-    ///     Initializes a new instance of the <see cref="DefaultLogger" /> class.
-    /// </summary>
-    private DefaultLogger() {
-        _cphInline = new CPHInline();
-    }
-
-    /// <summary>
-    ///     Gets the singleton instance of the <see cref="DefaultLogger" /> class.
-    /// </summary>
-    /// <value>
-    ///     The singleton instance of the <see cref="DefaultLogger" /> class.
-    /// </value>
-    private static DefaultLogger Instance { get; } = new();
-
+public static class Logger {
+    private static bool? _logging;
+    
     /// <summary>
     ///     Gets a value indicating whether logging is enabled.
     /// </summary>
     /// <value>
     ///     <c>true</c> if logging is enabled; otherwise, <c>false</c>.
     /// </value>
-    private bool Logging {
+    private static bool Logging {
         get {
             if (_logging.HasValue) {
                 return _logging.Value;
             }
 
-            _logging = !_cphInline.TryGetArg("logging", out bool logging) || logging;
+            _logging = !CPHStore.GetCPH().TryGetArg("logging", out bool logging) || logging;
 
-            return (bool)_logging;
+            return _logging.Value;
         }
     }
 
@@ -1643,43 +1601,31 @@ public class DefaultLogger : ILogger {
     /// <exception cref="ArgumentOutOfRangeException">
     ///     Thrown when the specified <paramref name="level" /> is not a valid <see cref="LogLevel" />.
     /// </exception>
-    public void Log(string message, LogLevel level) {
-        _cphInline.LogInfo("Log method called");
-
+    /// <remarks>
+    ///     As of right now, only <c>LogLevel.Info</c> and <c>LogLevel.Warn</c> will be disabled if `logging = false`
+    /// </remarks>
+    public static void Log(string message, LogLevel level) {
         if (level != LogLevel.Error && !Logging) {
             return;
         }
 
         switch (level) {
             case LogLevel.Info:
-                _cphInline.LogInfo(message);
+                CPHStore.GetCPH()?.LogInfo(message);
 
                 break;
-
             case LogLevel.Warn:
-                _cphInline.LogWarn(message);
+                CPHStore.GetCPH()?.LogWarn(message);
 
                 break;
-
             case LogLevel.Error:
-                _cphInline.LogError(message);
+                CPHStore.GetCPH()?.LogError(message);
 
                 break;
-
             default:
                 throw new ArgumentOutOfRangeException(nameof(level),
                                                       level,
                                                       $"No member of Enum LogLevel matching {level.ToString()} exists.");
         }
-    }
-
-    /// <summary>
-    ///     Factory method to create a new default instance of the <see cref="ILogger" /> interface.
-    /// </summary>
-    /// <returns>
-    ///     A new instance of the <see cref="DefaultLogger" /> class.
-    /// </returns>
-    public static DefaultLogger CreateInstance() {
-        return Instance;
     }
 }
