@@ -27,8 +27,8 @@ Has feature parity with other popular clip players, including:
 - Either `!watch <clip-link>` or `!watch` after a clip link has been posted in chat will play the clip. If it doesn't
   exist already, a scene and source will be created and included in your current scene. This scene source can be
   copy/pasted to other scenes as desired.
-- If multiple clips are enqueued by sequential commands in chat, they will play in order.
-- Shoutouts also have their own queue, and will play in the order they are received.
+- [WIP] If multiple clips are enqueued by sequential commands in chat, they will play in order.
+- [WIP] Shoutouts also have their own queue, and will play in the order they are received.
 
 ### Shoutouts
 
