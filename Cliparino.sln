@@ -3,14 +3,15 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Cliparino", "Cliparino\Cliparino.csproj", "{689C0591-2F91-4AC3-9D2A-4F5623D4A3C7}"
-EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{72B75707-BF46-463A-B930-305EDFB88DB9}"
 	ProjectSection(SolutionItems) = preProject
 		.gitignore = .gitignore
-		BRIEF LICENSE TEXT.txt = BRIEF LICENSE TEXT.txt
 		README.md = README.md
 	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cliparino", "Cliparino\Cliparino.csproj", "{169F251E-E39E-4E2C-ADA7-C0E8C731D63D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cliparino.Tests", "CliparinoTests\Cliparino.Tests.csproj", "{D3AF727E-D0CF-498B-AC03-EE5082560C5D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -18,10 +19,14 @@ Global
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{689C0591-2F91-4AC3-9D2A-4F5623D4A3C7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{689C0591-2F91-4AC3-9D2A-4F5623D4A3C7}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{689C0591-2F91-4AC3-9D2A-4F5623D4A3C7}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{689C0591-2F91-4AC3-9D2A-4F5623D4A3C7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{169F251E-E39E-4E2C-ADA7-C0E8C731D63D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{169F251E-E39E-4E2C-ADA7-C0E8C731D63D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{169F251E-E39E-4E2C-ADA7-C0E8C731D63D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{169F251E-E39E-4E2C-ADA7-C0E8C731D63D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D3AF727E-D0CF-498B-AC03-EE5082560C5D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D3AF727E-D0CF-498B-AC03-EE5082560C5D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D3AF727E-D0CF-498B-AC03-EE5082560C5D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D3AF727E-D0CF-498B-AC03-EE5082560C5D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
