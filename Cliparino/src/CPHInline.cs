@@ -162,7 +162,7 @@ public class CPHInline : CPHInlineBase {
                 return false;
             }
 
-            EnsureCliparinoInCurrentSceneAsync("about:blank").GetAwaiter().GetResult();
+            EnsureCliparinoInCurrentSceneAsync(null, string.Empty).GetAwaiter().GetResult();
 
             var input0 = GetArgument("input0", string.Empty);
             var width = GetArgument("width", DefaultWidth);
@@ -218,11 +218,11 @@ public class CPHInline : CPHInlineBase {
                      try {
                          LogMessage(LogLevel.Info, "Started background thread to handle the Watch command.");
 
-                         await EnsureCliparinoInSceneAsync(url);
+                         var currentScene = CPH.ObsGetCurrentScene();
 
-                         var effectiveUrl = GetEffectiveUrlOrLogError(url);
+                         await EnsureCliparinoInSceneAsync(currentScene, url);
 
-                         if (string.IsNullOrEmpty(effectiveUrl)) {
+                         if (string.IsNullOrEmpty(url)) {
                              LogMessage(LogLevel.Warn, "Effective URL is empty or invalid. Aborting.");
 
                              return;
@@ -230,7 +230,7 @@ public class CPHInline : CPHInlineBase {
 
                          LogBrowserSourceSetup("http://localhost:8080/index.htm", width, height);
 
-                         var clipData = await FetchValidClipDataWithCache(null, effectiveUrl);
+                         var clipData = await FetchValidClipDataWithCache(null, url);
 
                          if (clipData == null) {
                              LogMessage(LogLevel.Warn, "Clip data is null or invalid. Aborting.");
@@ -238,7 +238,7 @@ public class CPHInline : CPHInlineBase {
                              return;
                          }
 
-                         HostClipWithDetails(effectiveUrl, clipData);
+                         HostClipWithDetails(url, clipData);
                      } catch (Exception ex) {
                          LogError(nameof(HandleWatchCommand), ex);
                      }
@@ -249,17 +249,56 @@ public class CPHInline : CPHInlineBase {
         LogMessage(LogLevel.Debug, $"{methodName} called with url: {url}, width: {width}, height: {height}");
     }
 
-    private async Task EnsureCliparinoInSceneAsync(string clipUrl) {
-        await Task.Run(() => EnsureCliparinoInCurrentSceneAsync(clipUrl));
-    }
+    private async Task EnsureCliparinoInSceneAsync(string currentScene, string clipUrl = null) {
+        const string sourceName = "Cliparino";
 
-    private string GetEffectiveUrlOrLogError(string url) {
+        if (string.IsNullOrEmpty(currentScene)) currentScene = CPH.ObsGetCurrentScene();
+
+        if (string.IsNullOrEmpty(currentScene))
+            throw new InvalidOperationException("Failed to retrieve the current OBS scene.");
+
+        if (!SceneExists(currentScene)) {
+            LogInfoIfEnabled($"Scene '{currentScene}' does not exist. Creating scene...");
+            CreateScene(currentScene);
+        }
+
+        if (!SourceExistsInScene(currentScene, sourceName)) {
+            var sourceUrl = CreateSourceUrl("http://localhost:8080/index.htm");
+
+            if ((string)GetCurrentSourceUrl("Cliparino", "Player") != sourceUrl) {
+                LogMessage(LogLevel.Info, $"Updating browser source URL for 'Player' to '{sourceUrl}'.");
+                UpdateBrowserSource("Cliparino", "Player", sourceUrl);
+
+                var loadedUrl = GetCurrentSourceUrl("Cliparino", "Player");
+                Log(LogLevel.Info, $"Browser source 'Player' current URL: {loadedUrl}");
+
+                RefreshBrowserSource();
+            } else {
+                LogMessage(LogLevel.Debug, "Browser source URL for 'Player' is already up-to-date.");
+            }
+
+            AddBrowserSource(currentScene, sourceName, CreateSourceUrl("http://localhost:8080/index.htm"));
+        } else {
+            LogInfoIfEnabled($"Source '{sourceName}' already exists in scene '{currentScene}'. Updating browser source...");
+            UpdateBrowserSource(currentScene, sourceName, CreateSourceUrl("http://localhost:8080/index.htm"));
+
+            var loadedUrl = GetCurrentSourceUrl("Cliparino", "Player");
+            Log(LogLevel.Info, $"Browser source 'Player' current URL: {loadedUrl}");
+            RefreshBrowserSource();
+        }
+
+        if (string.IsNullOrEmpty(clipUrl)) return;
+
         try {
-            return WebUtility.HtmlEncode(GetEffectiveUrl(url));
-        } catch (Exception ex) {
-            LogError(GetErrorMessage("GetEffectiveUrlOrLogError"), ex);
+            var clipData = await GetClipData(clipUrl);
+            var gameId = clipData?.GameId;
 
-            return string.Empty;
+            if (string.IsNullOrEmpty(gameId))
+                throw new InvalidOperationException("Clip data does not contain a valid Game ID.");
+
+            await FetchTwitchData<GameData>($"https://api.twitch.tv/helix/games?id={gameId}");
+        } catch (Exception ex) {
+            LogMessage(LogLevel.Error, $"Error in EnsureCliparinoInSceneAsync: {ex.Message}");
         }
     }
 
@@ -269,30 +308,6 @@ public class CPHInline : CPHInlineBase {
 
     private void LogError(string methodName, Exception ex) {
         LogMessage(LogLevel.Error, $"{GetErrorMessage(methodName)}: {ex.Message}");
-    }
-
-    private string GetEffectiveUrl(string url) {
-        LogMessage(LogLevel.Debug, $"GetEffectiveUrl called with url: {url}");
-
-        try {
-            if (string.IsNullOrEmpty(url) && CPH != null) {
-                url = CPH.GetGlobalVar<string>(LastClipUrlKey) ?? string.Empty;
-
-                if (string.IsNullOrEmpty(url)) {
-                    LogMessage(LogLevel.Warn, NoUrlMessage);
-
-                    throw new InvalidOperationException("No valid URL available.");
-                }
-            }
-
-            CPH?.SetGlobalVar(LastClipUrlKey, url);
-
-            return url;
-        } catch (Exception ex) {
-            LogMessage(LogLevel.Error, $"Error occurred in GetEffectiveUrl: {ex.Message}");
-
-            return "about:blank";
-        }
     }
 
     private void HandleShoutoutCommand(string user) {
@@ -986,9 +1001,9 @@ public class CPHInline : CPHInlineBase {
         return await FetchTwitchData<ClipData>($"https://api.twitch.tv/helix/clips?id={clipId}");
     }
 
-    private async Task<string> EnsureCliparinoInCurrentSceneAsync(string clipUrl) {
+    private async Task<string> EnsureCliparinoInCurrentSceneAsync(string currentScene, string clipUrl) {
         try {
-            var currentScene = CPH.ObsGetCurrentScene();
+            if (string.IsNullOrEmpty(currentScene)) currentScene = CPH.ObsGetCurrentScene();
 
             if (string.IsNullOrEmpty(currentScene)) {
                 Log(LogLevel.Warn, "Current scene is empty or null.");
@@ -996,7 +1011,7 @@ public class CPHInline : CPHInlineBase {
                 return "Unknown Scene";
             }
 
-            await EnsureCliparinoInSceneAsync(currentScene);
+            await EnsureCliparinoInSceneAsync(currentScene, clipUrl);
         } catch (Exception ex) {
             LogError($"Error in EnsureCliparinoInCurrentSceneAsync: {ex.Message}");
         }
@@ -1012,6 +1027,54 @@ public class CPHInline : CPHInlineBase {
             LogError($"Error fetching game name: {ex.Message}");
 
             return "Unknown Game";
+        }
+    }
+
+    private object GetCurrentSourceUrl(string sceneName, string sourceName) {
+        try {
+            if (!SceneExists(sceneName)) {
+                LogError($"Scene '{sceneName}' does not exist.");
+
+                return null;
+            }
+
+            if (!SourceExistsInScene(sceneName, sourceName)) {
+                LogError($"Source '{sourceName}' does not exist in scene '{sceneName}'.");
+
+                return null;
+            }
+
+            var sourceProperties = GetSourceProperties(sceneName, sourceName);
+
+            if (sourceProperties is Dictionary<string, object> dictionary && dictionary.TryGetValue("url", out var url))
+                return url;
+
+            LogError($"Failed to retrieve URL for source '{sourceName}' in scene '{sceneName}'.");
+
+            return null;
+        } catch (Exception ex) {
+            LogError($"Exception in {nameof(GetCurrentSourceUrl)}: {ex.Message}");
+
+            return null;
+        }
+    }
+
+    private object GetSourceProperties(string sceneName, string sourceName) {
+        try {
+            var payload = new { requestType = "GetInputSettings", requestData = new { inputName = sourceName } };
+            var responseJson = CPH.ObsSendRaw(payload.requestType, JsonConvert.SerializeObject(payload.requestData));
+            var response = JsonConvert.DeserializeObject<JObject>(responseJson);
+
+            if (response != null && response.TryGetValue("inputSettings", out var inputSettingsToken))
+                return inputSettingsToken.ToObject<Dictionary<string, object>>();
+
+            Log(LogLevel.Warn, $"Failed to retrieve properties for source '{sourceName}' in scene '{sceneName}'.");
+
+            return null;
+        } catch (Exception ex) {
+            Log(LogLevel.Error, $"Error in {nameof(GetSourceProperties)}: {ex.Message}");
+
+            return null;
         }
     }
 
@@ -1104,6 +1167,50 @@ public class CPHInline : CPHInlineBase {
             Log(LogLevel.Error, $"Error in SourceExistsInScene: {ex.Message}");
 
             return false;
+        }
+    }
+
+    private bool SceneExists(string sceneName) {
+        try {
+            LogMessage(LogLevel.Debug, $"Checking existence of scene '{sceneName}'.");
+
+            var payload = new { requestType = "GetSceneList" };
+            var responseJson = CPH.ObsSendRaw(payload.requestType, "{}");
+
+            if (!string.IsNullOrWhiteSpace(responseJson)) {
+                var response = JsonConvert.DeserializeObject<JObject>(responseJson);
+
+                if (response != null
+                    && response.TryGetValue("scenes", out var scenesToken)
+                    && scenesToken is JArray scenesArray) {
+                    var exists = scenesArray.Any(scene => string.Equals(scene["sceneName"]?.ToString(),
+                                                                        sceneName,
+                                                                        StringComparison.OrdinalIgnoreCase));
+                    LogMessage(LogLevel.Info, $"Scene existence check for '{sceneName}': {exists}. ");
+
+                    return exists;
+                }
+
+                LogMessage(LogLevel.Warn, "OBS response lacks valid 'scenes' property.");
+            } else {
+                LogMessage(LogLevel.Warn, "Empty response received from OBS for scene validation.");
+            }
+        } catch (Exception ex) {
+            LogMessage(LogLevel.Error, $"Error verifying existence of scene '{sceneName}': {ex.Message}");
+        }
+
+        return false;
+    }
+
+    private void CreateScene(string sceneName) {
+        try {
+            var payload = new { requestType = "CreateScene", requestData = new { sceneName } };
+
+            CPH.ObsSendRaw(payload.requestType, JsonConvert.SerializeObject(payload.requestData));
+
+            Log(LogLevel.Info, $"Scene '{sceneName}' has been created successfully.");
+        } catch (Exception ex) {
+            LogError($"Error in CreateScene: {ex.Message}");
         }
     }
 
