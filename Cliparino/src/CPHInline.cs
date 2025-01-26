@@ -46,6 +46,10 @@ using Twitch.Common.Models.Api;
 
 // ReSharper disable once UnusedType.Global
 // ReSharper disable once ClassNeverInstantiated.Global
+/// <summary>
+///     Represents a custom inline script handler for the Streamer.bot environment. Handles commands, interactions, and
+///     execution logic specific to Cliparino's Twitch clip management.
+/// </summary>
 public class CPHInline : CPHInlineBase {
     private const int DefaultWidth = 1920;
     private const int DefaultHeight = 1080;
@@ -171,6 +175,26 @@ public class CPHInline : CPHInlineBase {
         return CPH.TryGetArg(argName, out T value) ? value : defaultValue;
     }
 
+    // ReSharper disable once UnusedMember.Global
+    /// <summary>
+    ///     Executes the primary logic for the `CPHInline` object. This is the main entry point for the script, called by
+    ///     Streamer.bot during execution.
+    /// </summary>
+    /// <remarks>
+    ///     Streamer.bot invokes this method to execute the user's custom logic. The method processes chat commands such as
+    ///     `!watch`, `!so`, `!replay`, or `!stop` to control playback of Twitch clips and OBS overlay behavior.
+    /// </remarks>
+    /// <returns>
+    ///     A boolean indicating whether the script executed successfully. Returns
+    ///     <c>
+    ///         true
+    ///     </c>
+    ///     if execution succeeded; otherwise,
+    ///     <c>
+    ///         false
+    ///     </c>
+    ///     .
+    /// </returns>
     public bool Execute() {
         LogMessage(LogLevel.Debug, "Execute for Cliparino started.");
 
@@ -1600,26 +1624,109 @@ public class CPHInline : CPHInlineBase {
         public int ClipAgeDays { get; } = clipAgeDays;
     }
 
+    /// <summary>
+    ///     Represents a single Twitch clip's data model, including information such as the URL, creator details, game details,
+    ///     and more.
+    /// </summary>
     [SuppressMessage("ReSharper", "MemberCanBePrivate.Global")]
     [SuppressMessage("ReSharper", "UnusedMember.Global")]
     public class Clip {
+        /// <summary>
+        ///     Gets or sets the unique identifier for the clip.
+        /// </summary>
         public string Id { get; set; }
+
+        /// <summary>
+        ///     Gets or sets the direct URL to view the clip.
+        /// </summary>
         public string Url { get; set; }
+
+        /// <summary>
+        ///     Gets or sets the embeddable URL for the clip. Used when embedding the clip in web-based overlays or pages.
+        /// </summary>
         public string EmbedUrl { get; set; }
+
+        /// <summary>
+        ///     Gets or sets the Twitch broadcaster's unique ID that the clip is associated with.
+        /// </summary>
         public string BroadcasterId { get; set; }
+
+        /// <summary>
+        ///     Gets or sets the Twitch broadcaster's display name that the clip is associated with.
+        /// </summary>
         public string BroadcasterName { get; set; }
+
+        /// <summary>
+        ///     Gets or sets the unique identifier of the clip's creator.
+        /// </summary>
         public int CreatorId { get; set; }
+
+        /// <summary>
+        ///     Gets or sets the display name of the clip's creator.
+        /// </summary>
         public string CreatorName { get; set; }
+
+        /// <summary>
+        ///     Gets or sets the ID of the video the clip is derived from, i.e., the stream's VoD ID.
+        /// </summary>
         public string VideoId { get; set; }
+
+        /// <summary>
+        ///     Gets or sets the ID of the game that was being streamed when the clip was created.
+        /// </summary>
         public string GameId { get; set; }
+
+        /// <summary>
+        ///     Gets or sets the language of the clip's content (e.g., "en" for English).
+        /// </summary>
         public string Language { get; set; }
+
+        /// <summary>
+        ///     Gets or sets the title of the clip.
+        /// </summary>
         public string Title { get; set; }
+
+        /// <summary>
+        ///     Gets or sets the total number of views for the clip.
+        /// </summary>
         public int ViewCount { get; set; }
+
+        /// <summary>
+        ///     Gets or sets the time when the clip was created (UTC).
+        /// </summary>
         public DateTime CreatedAt { get; set; }
+
+        /// <summary>
+        ///     Gets or sets the URL to the clip's thumbnail image.
+        /// </summary>
         public string ThumbnailUrl { get; set; }
+
+        /// <summary>
+        ///     Gets or sets the duration of the clip in seconds.
+        /// </summary>
         public float Duration { get; set; }
+
+        /// <summary>
+        ///     Gets or sets a value indicating whether the clip is featured content on Twitch.
+        /// </summary>
         public bool IsFeatured { get; set; }
 
+        /// <summary>
+        ///     Creates a
+        ///     <see cref="Clip" />
+        ///     object from a Twitch clip's raw JSON data.
+        /// </summary>
+        /// <param name="twitchClip">
+        ///     A JSON object representing the raw Twitch clip data.
+        /// </param>
+        /// <returns>
+        ///     An instance of the
+        ///     <see cref="Clip" />
+        ///     class with data populated from Twitch.
+        /// </returns>
+        /// <exception cref="InvalidOperationException">
+        ///     Thrown if the provided JSON object is invalid or null.
+        /// </exception>
         public static Clip FromTwitchClip(JObject twitchClip) {
             if (twitchClip != null)
                 return new Clip {
@@ -1644,6 +1751,30 @@ public class CPHInline : CPHInlineBase {
             throw new InvalidOperationException("Invalid twitch clip format.");
         }
 
+        /// <summary>
+        ///     Creates a
+        ///     <see cref="Clip" />
+        ///     object from a
+        ///     <see cref="ClipData" />
+        ///     instance.
+        /// </summary>
+        /// <param name="twitchClipData">
+        ///     An instance of the
+        ///     <see cref="ClipData" />
+        ///     class populated with clip information.
+        /// </param>
+        /// <returns>
+        ///     An instance of
+        ///     <see cref="Clip" />
+        ///     created from the
+        ///     <see cref="ClipData" />
+        ///     .
+        /// </returns>
+        /// <exception cref="InvalidOperationException">
+        ///     Thrown if the
+        ///     <see cref="ClipData" />
+        ///     is invalid or null.
+        /// </exception>
         public static Clip FromTwitchClip(ClipData twitchClipData) {
             if (twitchClipData != null)
                 return new Clip {
@@ -1668,6 +1799,25 @@ public class CPHInline : CPHInlineBase {
             throw new InvalidOperationException("Invalid twitch clip data format.");
         }
 
+        /// <summary>
+        ///     Converts the
+        ///     <see cref="Clip" />
+        ///     object into a
+        ///     <see cref="ClipData" />
+        ///     representation for interaction with other parts of the system.
+        /// </summary>
+        /// <param name="cphInstance">
+        ///     A reference to the parent
+        ///     <see cref="CPHInline" />
+        ///     instance.
+        /// </param>
+        /// <returns>
+        ///     A new
+        ///     <see cref="ClipData" />
+        ///     object populated with data from this
+        ///     <see cref="Clip" />
+        ///     instance.
+        /// </returns>
         public ClipData ToClipData(CPHInline cphInstance) {
             try {
                 return new ClipData {
@@ -1702,10 +1852,7 @@ public class CPHInline : CPHInlineBase {
 
     private class GameData {
         [JsonProperty("id")] public string Id { get; set; }
-
         [JsonProperty("name")] public string Name { get; set; }
-
-        [JsonProperty("box_art_url")] public string BoxArtUrl { get; set; }
     }
 
     private interface IPayload {
