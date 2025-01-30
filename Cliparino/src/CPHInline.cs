@@ -163,6 +163,12 @@ public class CPHInline : CPHInlineBase {
     private bool _loggingEnabled;
     private HttpListener _server;
 
+    private void CancelCurrentToken() {
+        _autoStopCancellationTokenSource?.Cancel();
+        _autoStopCancellationTokenSource?.Dispose();
+        _autoStopCancellationTokenSource = new CancellationTokenSource();
+    }
+
     private static string GetErrorMessage(string methodName) {
         return $"An error occurred in {methodName}";
     }
@@ -295,53 +301,104 @@ public class CPHInline : CPHInlineBase {
     private async Task EnsureCliparinoInSceneAsync(string currentScene, string clipUrl = null) {
         const string sourceName = "Cliparino";
 
-        if (string.IsNullOrEmpty(currentScene)) currentScene = CPH.ObsGetCurrentScene();
+        try {
+            LogMessage(LogLevel.Debug, "Entering EnsureCliparinoInSceneAsync.");
 
-        if (string.IsNullOrEmpty(currentScene))
-            throw new InvalidOperationException("Failed to retrieve the current OBS scene.");
-
-        if (!SceneExists(currentScene)) {
-            LogInfoIfEnabled($"Scene '{currentScene}' does not exist. Creating scene...");
-            CreateScene(currentScene);
-        }
-
-        if (!SourceExistsInScene(currentScene, sourceName)) {
-            var sourceUrl = CreateSourceUrl("http://localhost:8080/index.htm");
-
-            if ((string)GetCurrentSourceUrl("Cliparino", "Player") != sourceUrl) {
-                LogMessage(LogLevel.Info, $"Updating browser source URL for 'Player' to '{sourceUrl}'.");
-                UpdateBrowserSource("Cliparino", "Player", sourceUrl);
-
-                var loadedUrl = GetCurrentSourceUrl("Cliparino", "Player");
-                Log(LogLevel.Info, $"Browser source 'Player' current URL: {loadedUrl}");
-
-                RefreshBrowserSource();
-            } else {
-                LogMessage(LogLevel.Debug, "Browser source URL for 'Player' is already up-to-date.");
+            if (string.IsNullOrEmpty(currentScene)) {
+                LogMessage(LogLevel.Info, "Current scene is null or empty, fetching the current OBS scene.");
+                currentScene = CPH.ObsGetCurrentScene();
             }
 
-            AddBrowserSource(currentScene, sourceName, CreateSourceUrl("http://localhost:8080/index.htm"));
-        } else {
-            LogInfoIfEnabled($"Source '{sourceName}' already exists in scene '{currentScene}'. Updating browser source...");
-            UpdateBrowserSource(currentScene, sourceName, CreateSourceUrl("http://localhost:8080/index.htm"));
+            if (string.IsNullOrEmpty(currentScene)) {
+                LogMessage(LogLevel.Error, "Failed to retrieve the current OBS scene.");
 
-            var loadedUrl = GetCurrentSourceUrl("Cliparino", "Player");
-            Log(LogLevel.Info, $"Browser source 'Player' current URL: {loadedUrl}");
-            RefreshBrowserSource();
-        }
+                throw new InvalidOperationException("Failed to retrieve the current OBS scene.");
+            }
 
-        if (string.IsNullOrEmpty(clipUrl)) return;
+            if (!SceneExists(currentScene)) {
+                LogMessage(LogLevel.Info, $"Scene '{currentScene}' does not exist. Creating scene...");
 
-        try {
-            var clipData = await GetClipData(clipUrl);
-            var gameId = clipData?.GameId;
+                try {
+                    CreateScene(currentScene);
+                    LogMessage(LogLevel.Debug, $"Scene '{currentScene}' created successfully.");
+                } catch (Exception ex) {
+                    LogMessage(LogLevel.Error, $"Error creating scene '{currentScene}': {ex.Message}");
 
-            if (string.IsNullOrEmpty(gameId))
-                throw new InvalidOperationException("Clip data does not contain a valid Game ID.");
+                    return;
+                }
+            }
 
-            await FetchTwitchData<GameData>($"https://api.twitch.tv/helix/games?id={gameId}");
+            if (!SourceExistsInScene(currentScene, sourceName)) {
+                LogMessage(LogLevel.Info,
+                           $"Source '{sourceName}' does not exist in scene '{currentScene}'. Adding it...");
+                var sourceUrl = CreateSourceUrl("http://localhost:8080/index.htm");
+
+                try {
+                    if ((string)GetCurrentSourceUrl("Cliparino", "Player") != sourceUrl) {
+                        LogMessage(LogLevel.Info, $"Updating browser source URL for 'Player' to '{sourceUrl}'.");
+                        UpdateBrowserSource("Cliparino", "Player", sourceUrl);
+
+                        var loadedUrl = GetCurrentSourceUrl("Cliparino", "Player");
+                        LogMessage(LogLevel.Info, $"Browser source 'Player' current URL: {loadedUrl}");
+                        RefreshBrowserSource();
+                    } else {
+                        LogMessage(LogLevel.Debug, "Browser source URL for 'Player' is already up-to-date.");
+                    }
+
+                    AddBrowserSource(currentScene, sourceName, sourceUrl);
+                    LogMessage(LogLevel.Debug, $"Added browser source '{sourceName}' to scene '{currentScene}'.");
+                } catch (Exception ex) {
+                    LogMessage(LogLevel.Error, $"Error adding or updating browser source: {ex.Message}");
+
+                    return;
+                }
+            } else {
+                LogMessage(LogLevel.Info,
+                           $"Source '{sourceName}' already exists in scene '{currentScene}'. Updating browser source...");
+
+                try {
+                    UpdateBrowserSource(currentScene, sourceName, CreateSourceUrl("http://localhost:8080/index.htm"));
+                    LogMessage(LogLevel.Debug,
+                               $"Browser source '{sourceName}' updated successfully in scene '{currentScene}'.");
+
+                    var loadedUrl = GetCurrentSourceUrl("Cliparino", "Player");
+                    LogMessage(LogLevel.Info, $"Browser source 'Player' current URL: {loadedUrl}");
+                    RefreshBrowserSource();
+                } catch (Exception ex) {
+                    LogMessage(LogLevel.Error, $"Error updating browser source: {ex.Message}");
+
+                    return;
+                }
+            }
+
+            if (string.IsNullOrEmpty(clipUrl)) {
+                LogMessage(LogLevel.Debug, "Clip URL is null or empty, exiting function.");
+
+                return;
+            }
+
+            LogMessage(LogLevel.Debug, $"Fetching clip data for URL: {clipUrl}");
+
+            try {
+                var clipData = await GetClipData(clipUrl);
+                var gameId = clipData?.GameId;
+
+                if (string.IsNullOrEmpty(gameId)) {
+                    LogMessage(LogLevel.Error, "Clip data does not contain a valid Game ID.");
+
+                    throw new InvalidOperationException("Clip data does not contain a valid Game ID.");
+                }
+
+                LogMessage(LogLevel.Debug, $"Fetching Twitch data for Game ID: {gameId}");
+                await FetchTwitchData<GameData>($"https://api.twitch.tv/helix/games?id={gameId}");
+                LogMessage(LogLevel.Info, "Twitch data fetched successfully.");
+            } catch (Exception ex) {
+                LogMessage(LogLevel.Error, $"Error fetching clip data or Twitch data: {ex.Message}");
+            }
         } catch (Exception ex) {
-            LogMessage(LogLevel.Error, $"Error in EnsureCliparinoInSceneAsync: {ex.Message}");
+            LogMessage(LogLevel.Error, $"Unhandled exception in EnsureCliparinoInSceneAsync: {ex.Message}");
+        } finally {
+            LogMessage(LogLevel.Debug, "Exiting EnsureCliparinoInSceneAsync.");
         }
     }
 
@@ -401,7 +458,7 @@ public class CPHInline : CPHInlineBase {
                          var clip = GetRandomClip(extendedUserInfo.UserId, clipSettings);
 
                          if (clip != null) {
-                             HostClipWithDetails(null, clip.ToClipData(this));
+                             HostClipWithDetails(clip.Url, clip.ToClipData(this));
                          } else {
                              var noClipMessage =
                                  $"It looks like there aren't any clips for {extendedUserInfo.UserName}... yet. "
@@ -614,13 +671,10 @@ public class CPHInline : CPHInlineBase {
     }
 
     private void HandleStopCommand() {
-        if (_autoStopCancellationTokenSource != null) {
-            _autoStopCancellationTokenSource.Cancel();
-            _autoStopCancellationTokenSource = null;
-            LogMessage(LogLevel.Info, "Cancelled ongoing auto-stop task.");
-        }
-
         LogMessage(LogLevel.Debug, "HandleStopCommand called, setting browser source page to blank layout.");
+
+        CancelCurrentToken();
+        LogMessage(LogLevel.Info, "Cancelled ongoing auto-stop task.");
         LogMessage(LogLevel.Info, "Stopping playback and hiding Cliparino.");
 
         var currentScene = CPH.ObsGetCurrentScene();
@@ -788,16 +842,16 @@ public class CPHInline : CPHInlineBase {
 
             if (!SourceExistsInScene(currentScene, cliparinoSceneName)) {
                 LogMessage(LogLevel.Warn,
-                           $"The source '{cliparinoSceneName}' does not exist in the current scene ('{currentScene}'). Attempting to ad.");
+                           $"The source '{cliparinoSceneName}' does not exist in the current scene ('{currentScene}'). Attempting to add.");
 
-                AddBrowserSource(cliparinoSceneName, playerSourceName, "http://localhost:8080/index.htm");
+                AddSceneSource(currentScene, cliparinoSceneName);
 
-                if (SourceExistsInScene(cliparinoSceneName, playerSourceName)) return;
+                if (!SourceExistsInScene(currentScene, cliparinoSceneName)) {
+                    LogMessage(LogLevel.Error,
+                               $"Failed to create the '{cliparinoSceneName}' source in the '{currentScene}' scene. Aborting playback setup.");
 
-                LogMessage(LogLevel.Error,
-                           $"Failed to create the '{playerSourceName}' source in the '{cliparinoSceneName}' scene. Aborting playback setup.");
-
-                return;
+                    return;
+                }
             }
 
             LogMessage(LogLevel.Info,
@@ -827,8 +881,9 @@ public class CPHInline : CPHInlineBase {
 
             Task.Run(async () => {
                          try {
-                             using var cancellationTokenSource = new CancellationTokenSource();
-                             _autoStopCancellationTokenSource = cancellationTokenSource;
+                             CancelCurrentToken();
+
+                             using var cancellationTokenSource = _autoStopCancellationTokenSource;
 
                              await Task.Delay(TimeSpan.FromSeconds(GetDurationWithSetupDelay(clipData.Duration)
                                                                        .TotalSeconds),
@@ -838,10 +893,10 @@ public class CPHInline : CPHInlineBase {
                                  HandleStopCommand();
                                  LogMessage(LogLevel.Info, "Auto-stop task completed successfully.");
                              }
+                         } catch (OperationCanceledException) {
+                             LogMessage(LogLevel.Info, "Auto-stop task cancelled gracefully.");
                          } catch (Exception ex) {
                              LogMessage(LogLevel.Error, $"Unexpected error in auto-stop task: {ex.Message}");
-                         } finally {
-                             _autoStopCancellationTokenSource = null;
                          }
                      });
         } catch (Exception ex) {
