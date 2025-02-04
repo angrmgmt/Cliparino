@@ -55,7 +55,6 @@ public class CPHInline : CPHInlineBase {
     private const int DefaultHeight = 1080;
     private const int AdditionalHtmlSetupDelaySeconds = 3;
     private const string LastClipUrlKey = "last_clip_url";
-    private const string NoUrlMessage = "No URL provided and no last clip URL found.";
 
     private const string CSSText = """
                                        div {
@@ -222,10 +221,14 @@ public class CPHInline : CPHInlineBase {
             LogMessage(LogLevel.Info, $"Executing command: {command}");
 
             switch (command.ToLower()) {
-                case "!watch": HandleWatchCommand(input0, width, height); break;
-                case "!so": HandleShoutoutCommand(input0); break;
-                case "!replay": HandleReplayCommand(width, height); break;
+                case "!watch": HandleWatchCommandAsync(input0, width, height).GetAwaiter().GetResult(); break;
+
+                case "!so": HandleShoutoutCommandAsync(input0).GetAwaiter().GetResult(); break;
+
+                case "!replay": HandleReplayCommandAsync(width, height).GetAwaiter().GetResult(); break;
+
                 case "!stop": HandleStopCommand(); break;
+
                 default:
                     LogMessage(LogLevel.Warn, $"Unknown command: {command}");
 
@@ -237,6 +240,8 @@ public class CPHInline : CPHInlineBase {
             LogMessage(LogLevel.Error, $"An error occurred: {ex.Message}");
 
             return false;
+        } finally {
+            LogMessage(LogLevel.Debug, "Execute for Cliparino completed.");
         }
     }
 
@@ -244,54 +249,47 @@ public class CPHInline : CPHInlineBase {
         return CPH.TryGetArg("command", out command);
     }
 
-    private void HandleWatchCommand(string url, int width, int height) {
-        LogMethodCall(nameof(HandleWatchCommand), url, width, height);
+    private async Task HandleWatchCommandAsync(string url, int width, int height) {
+        LogMethodCall(nameof(HandleWatchCommandAsync), url, width, height);
 
-        if (width <= 0 || height <= 0) {
-            LogMessage(LogLevel.Warn, "Invalid width or height provided. Falling back to default values.");
-            width = DefaultWidth;
-            height = DefaultHeight;
-        }
+        try {
+            // Validate width and height, and fall back if invalid
+            if (width <= 0 || height <= 0) {
+                LogMessage(LogLevel.Warn, "Invalid width or height provided. Falling back to default values.");
+                width = DefaultWidth;
+                height = DefaultHeight;
+            }
 
-        if (string.IsNullOrEmpty(url)) {
-            url = GetLastClipUrl();
+            // Validate and normalize the clip URL
+            url = ValidateClipUrl(url, null);
 
             if (string.IsNullOrEmpty(url)) {
-                LogMessage(LogLevel.Warn, NoUrlMessage);
+                LogMessage(LogLevel.Warn, "No valid clip URL provided. Aborting command.");
 
                 return;
             }
+
+            // Log the intent of the browser source setup before performing it
+            LogBrowserSourceSetup(url, width, height);
+
+            // Fetch the current OBS scene to prepare for hosting
+            var currentScene = CPH.ObsGetCurrentScene();
+
+            if (string.IsNullOrWhiteSpace(currentScene)) {
+                LogMessage(LogLevel.Warn, "Unable to determine the current OBS scene. Aborting clip setup.");
+
+                return;
+            }
+
+            // Prepare the scene for hosting the clip
+            await PrepareSceneForClipHostingAsync(currentScene, url);
+
+            // Process and host the validated clip
+            await ProcessAndHostClipDataAsync(url, null);
+        } catch (Exception ex) {
+            // Log exceptions appropriately for debugging
+            LogError(nameof(HandleWatchCommandAsync), ex);
         }
-
-        Task.Run(async () => {
-                     try {
-                         LogMessage(LogLevel.Info, "Started background thread to handle the Watch command.");
-
-                         var currentScene = CPH.ObsGetCurrentScene();
-
-                         await EnsureCliparinoInSceneAsync(currentScene, url);
-
-                         if (string.IsNullOrEmpty(url)) {
-                             LogMessage(LogLevel.Warn, "Effective URL is empty or invalid. Aborting.");
-
-                             return;
-                         }
-
-                         LogBrowserSourceSetup("http://localhost:8080/index.htm", width, height);
-
-                         var clipData = await FetchValidClipDataWithCache(null, url);
-
-                         if (clipData == null) {
-                             LogMessage(LogLevel.Warn, "Clip data is null or invalid. Aborting.");
-
-                             return;
-                         }
-
-                         HostClipWithDetails(url, clipData);
-                     } catch (Exception ex) {
-                         LogError(nameof(HandleWatchCommand), ex);
-                     }
-                 });
     }
 
     private void LogMethodCall(string methodName, string url, int width, int height) {
@@ -410,95 +408,89 @@ public class CPHInline : CPHInlineBase {
         LogMessage(LogLevel.Error, $"{GetErrorMessage(methodName)}: {ex.Message}");
     }
 
-    private void HandleShoutoutCommand(string user) {
-        LogMessage(LogLevel.Debug, $"HandleShoutoutCommand called with user: {user}");
+    private async Task HandleShoutoutCommandAsync(string user) {
+        LogMessage(LogLevel.Debug, $"{nameof(HandleShoutoutCommandAsync)} called with user: {user}");
 
-        Task.Run(() => {
-                     LogMessage(LogLevel.Info, "New thread started to handle the shoutout command.");
+        try {
+            if (string.IsNullOrEmpty(user)) {
+                LogMessage(LogLevel.Warn, "No user provided for shoutout.");
 
-                     try {
-                         if (string.IsNullOrEmpty(user)) {
-                             LogMessage(LogLevel.Warn, "No user provided for shoutout.");
+                return;
+            }
 
-                             return;
-                         }
+            // Normalize and sanitize the username
+            user = user.Trim().TrimStart('@').ToLowerInvariant();
+            LogMessage(LogLevel.Debug, $"Sanitized and normalized username for shoutout: {user}");
 
-                         user = user.Trim().TrimStart('@');
+            // Fetch extended Twitch user information
+            var extendedUserInfo = CPH.TwitchGetExtendedUserInfoByLogin(user);
 
-                         LogMessage(LogLevel.Debug, $"Sanitized username for shoutout: {user}");
+            if (extendedUserInfo == null) {
+                LogMessage(LogLevel.Warn, $"No extended user info found for: {user}");
 
-                         var originalUserInput = user;
+                return;
+            }
 
-                         user = user.ToLowerInvariant();
-                         LogMessage(LogLevel.Debug, $"Normalized user input from {originalUserInput} to {user}");
+            LogMessage(LogLevel.Debug, $"Fetched extended user info: {JsonConvert.SerializeObject(extendedUserInfo)}");
 
-                         var messageTemplate = GetArgument("message", string.Empty);
-                         var extendedUserInfo = CPH.TwitchGetExtendedUserInfoByLogin(user);
-                         var clipSettings = new ClipSettings(GetArgument("featuredOnly", false),
-                                                             GetArgument("maxClipSeconds", 30),
-                                                             GetArgument("clipAgeDays", 30));
+            // Prepare a message template
+            var messageTemplate = GetArgument("message", string.Empty);
 
-                         if (extendedUserInfo == null) {
-                             LogMessage(LogLevel.Warn, $"No extended user info found for: {user}");
+            if (string.IsNullOrEmpty(messageTemplate)) {
+                LogMessage(LogLevel.Warn, "Message template is missing or empty. Using default template.");
+                messageTemplate =
+                    "Check out [[userName]], they were last streaming [[userGame]] on https://twitch.tv/[[userName]]";
+            }
 
-                             return;
-                         }
+            LogMessage(LogLevel.Debug, $"Using shoutout template: {messageTemplate}");
 
-                         LogMessage(LogLevel.Debug,
-                                    $"Fetched extended user info: {JsonConvert.SerializeObject(extendedUserInfo)}");
+            // Get a random clip for the user, if available
+            var clipSettings = new ClipSettings(GetArgument("featuredOnly", false),
+                                                GetArgument("maxClipSeconds", 30),
+                                                GetArgument("clipAgeDays", 30));
+            var clip = GetRandomClip(extendedUserInfo.UserId, clipSettings);
 
-                         if (string.IsNullOrEmpty(messageTemplate)) {
-                             LogMessage(LogLevel.Warn, "Message template is missing or empty. Using default template.");
-                             messageTemplate =
-                                 "Check out [[userName]], they were last streaming [[userGame]] on https://twitch.tv/[[userName]]";
-                         }
+            if (clip != null) {
+                LogMessage(LogLevel.Info, $"Selected clip for shoutout: {clip.Url}");
+                await ProcessAndHostClipDataAsync(clip.Url, clip.ToClipData(this));
+            } else {
+                LogMessage(LogLevel.Warn, $"No clips found for user: {extendedUserInfo.UserName}");
 
-                         LogMessage(LogLevel.Debug, $"Using shoutout template: {messageTemplate}");
+                var noClipMessage = $"It looks like there aren't any clips for {extendedUserInfo.UserName}... yet. "
+                                    + $"Give them a follow and catch some clips next time they go live!";
+                CPH.SendMessage(noClipMessage);
+            }
 
-                         var clip = GetRandomClip(extendedUserInfo.UserId, clipSettings);
+            // Generate and send the shoutout message
+            var displayName = extendedUserInfo.UserName ?? user;
+            var lastGame = extendedUserInfo.Game;
 
-                         if (clip != null) {
-                             HostClipWithDetails(clip.Url, clip.ToClipData(this));
-                         } else {
-                             var noClipMessage =
-                                 $"It looks like there aren't any clips for {extendedUserInfo.UserName}... yet. "
-                                 + $"Give them a follow and catch some clips next time they go live!";
+            string shoutoutMessage;
 
-                             LogMessage(LogLevel.Info, $"Sending no-clips message to chat: {noClipMessage}");
-                             CPH.SendMessage(noClipMessage);
-                         }
+            if (clip == null) {
+                // If no clip is found, adjust the message to reflect that
+                if (string.IsNullOrEmpty(lastGame))
+                    shoutoutMessage = $"Looks like @{displayName} hasn't streamed anything yet, "
+                                      + $"but you might want to give that follow button a tickle anyway, just in case!";
+                else
+                    shoutoutMessage = $"Make sure to go check out @{displayName}! "
+                                      + $"They were last streaming {lastGame} over at https://twitch.tv/{displayName}";
+            } else {
+                // Fill in the message template if a clip is found
+                if (string.IsNullOrEmpty(lastGame)) {
+                    LogMessage(LogLevel.Info, $"No last game found for {displayName}, adjusting placeholders.");
+                    lastGame = "nothing yet";
+                }
 
-                         var displayName = extendedUserInfo.UserName ?? originalUserInput;
+                shoutoutMessage = messageTemplate.Replace("[[userName]]", displayName)
+                                                 .Replace("[[userGame]]", lastGame);
+            }
 
-                         LogMessage(LogLevel.Debug, $"Resolved DisplayName for user {user}: {displayName}");
-
-                         var lastGame = extendedUserInfo.Game;
-                         string shoutoutMessage;
-
-                         if (string.IsNullOrEmpty(messageTemplate)) {
-                             if (string.IsNullOrEmpty(lastGame))
-                                 shoutoutMessage = $"Looks like @{displayName} hasn't streamed anything yet, "
-                                                   + $"but you might want to give that follow button a tickle anyway, just in case!";
-                             else
-                                 shoutoutMessage = $"Make sure to go check out @{displayName}! "
-                                                   + $"They were last streaming {lastGame} over at https://twitch.tv/{displayName}";
-                         } else {
-                             if (string.IsNullOrEmpty(lastGame)) {
-                                 LogMessage(LogLevel.Info,
-                                            $"No last game found for {displayName}, adjusting placeholders.");
-                                 lastGame = "nothing yet";
-                             }
-
-                             shoutoutMessage = messageTemplate.Replace("[[userName]]", displayName)
-                                                              .Replace("[[userGame]]", lastGame);
-                         }
-
-                         LogMessage(LogLevel.Info, $"Sending shoutout message to chat: {shoutoutMessage}");
-                         CPH.SendMessage(shoutoutMessage);
-                     } catch (Exception ex) {
-                         LogMessage(LogLevel.Error, $"{GetErrorMessage(nameof(HandleShoutoutCommand))}: {ex.Message}");
-                     }
-                 });
+            LogMessage(LogLevel.Info, $"Sending shoutout message to chat: {shoutoutMessage}");
+            CPH.SendMessage(shoutoutMessage);
+        } catch (Exception ex) {
+            LogError(nameof(HandleShoutoutCommandAsync), ex);
+        }
     }
 
     private Clip GetRandomClip(string userId, ClipSettings clipSettings) {
@@ -627,28 +619,52 @@ public class CPHInline : CPHInlineBase {
         return clips[new Random().Next(clips.Count)];
     }
 
-    private void HandleReplayCommand(int width, int height) {
-        LogMessage(LogLevel.Debug, $"HandleReplayCommand called with width: {width}, height: {height}");
+    private async Task HandleReplayCommandAsync(int width, int height) {
+        LogMessage(LogLevel.Debug, $"{nameof(HandleReplayCommandAsync)} called with width: {width}, height: {height}");
 
-        Task.Run(async () => {
-                     try {
-                         LogMessage(LogLevel.Info, "Handling replay command.");
-                         var lastClipUrl = GetLastClipUrl();
+        try {
+            var lastClipUrl = GetLastClipUrl();
 
-                         if (string.IsNullOrEmpty(lastClipUrl)) return;
+            if (string.IsNullOrEmpty(lastClipUrl)) return;
 
-                         LogMessage(LogLevel.Info,
-                                    $"Setting browser source with URL: {lastClipUrl}, width: {width}, height: {height}");
+            await ProcessAndHostClipDataAsync(lastClipUrl, null);
+        } catch (Exception ex) {
+            LogError(nameof(HandleReplayCommandAsync), ex);
+        }
+    }
 
-                         var clipData = await FetchValidClipDataWithCache(null, lastClipUrl);
+    private async Task ProcessAndHostClipDataAsync(string clipUrl, ClipData clipData) {
+        try {
+            LogMessage(LogLevel.Info, $"Processing and hosting clip with URL: {clipUrl}");
+            var validatedClipData = clipData ?? await FetchValidClipDataWithCache(null, clipUrl);
 
-                         if (clipData == null) return;
+            if (validatedClipData == null) {
+                LogMessage(LogLevel.Error, "Validated clip data is null. Aborting hosting process.");
 
-                         HostClipWithDetails(lastClipUrl, clipData);
-                     } catch (Exception ex) {
-                         LogMessage(LogLevel.Error, $"{GetErrorMessage(nameof(HandleReplayCommand))}: {ex.Message}");
-                     }
-                 });
+                return;
+            }
+
+            await HostClipWithDetailsAsync(clipUrl, validatedClipData);
+        } catch (Exception ex) {
+            LogMessage(LogLevel.Error, $"Error in {nameof(ProcessAndHostClipDataAsync)}: {ex.Message}");
+        }
+    }
+
+    private string ValidateClipUrl(string clipUrl, ClipData clipData) {
+        if (!string.IsNullOrEmpty(clipUrl)) return clipUrl;
+
+        clipUrl = clipData?.Url;
+
+        if (!string.IsNullOrEmpty(clipUrl)) return clipUrl;
+
+        LogMessage(LogLevel.Error, "clipUrl is null or empty.");
+
+        return null;
+    }
+
+    private async Task PrepareSceneForClipHostingAsync(string sceneName, string clipUrl) {
+        LogMessage(LogLevel.Info, $"Preparing scene '{sceneName}' for clip hosting.");
+        await EnsureCliparinoInSceneAsync(sceneName, clipUrl);
     }
 
     private void SetLastClipUrl(string url) {
@@ -744,61 +760,6 @@ public class CPHInline : CPHInlineBase {
         return clipData;
     }
 
-    private async Task<Clip> FetchClipById(string clipId) {
-        try {
-            LogMessage(LogLevel.Info, $"Fetching clip data for Clip ID: {clipId}");
-
-            var apiUrl = $"https://api.twitch.tv/helix/clips?id={clipId}";
-            var clientId = CPH.TwitchClientId;
-            var accessToken = CPH.TwitchOAuthToken;
-
-            if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(accessToken))
-                throw new InvalidOperationException("Twitch API credentials (Client ID or Access Token) are missing.");
-
-            using var client = new HttpClient();
-
-            client.DefaultRequestHeaders.Add("Client-ID", clientId);
-            client.DefaultRequestHeaders.Add("Authorization", $"Bearer {accessToken}");
-
-            var response = await client.GetAsync(apiUrl);
-
-            if (!response.IsSuccessStatusCode) {
-                LogMessage(LogLevel.Error, $"Twitch API request failed: {response.ReasonPhrase}");
-
-                return null;
-            }
-
-            var responseData = await response.Content.ReadAsStringAsync();
-            dynamic clipDataJson = JsonConvert.DeserializeObject(responseData);
-
-            if (clipDataJson?.data == null || clipDataJson.data.Count == 0)
-                throw new Exception($"No data was returned for Clip ID: {clipId}");
-
-            var rawClipData = clipDataJson.data[0];
-
-            LogMessage(LogLevel.Debug, $"Creating Clip 'clip' from rawClipData: {rawClipData}");
-
-            var clip = Clip.FromTwitchClip(rawClipData);
-
-
-            lock (_clipDataCache) {
-                _clipDataCache[clipId] = clip.ToClipData(this);
-            }
-
-            LogMessage(LogLevel.Info, $"Successfully fetched and cached clip data for Clip ID: {clipId}");
-
-            return clip;
-        } catch (HttpRequestException httpEx) {
-            LogError(nameof(FetchClipById), httpEx);
-
-            return null;
-        } catch (Exception ex) {
-            LogError(nameof(FetchClipById), ex);
-
-            return null;
-        }
-    }
-
     private string ExtractClipIdFromUrl(string clipUrl) {
         if (string.IsNullOrEmpty(clipUrl)) return null;
 
@@ -818,9 +779,9 @@ public class CPHInline : CPHInlineBase {
         return null;
     }
 
-    private void HostClipWithDetails(string clipUrl, ClipData clipData) {
+    private async Task HostClipWithDetailsAsync(string clipUrl, ClipData clipData) {
         LogMessage(LogLevel.Debug,
-                   $"{nameof(HostClipWithDetails)} called with clipUrl: {clipUrl}, clipData: {JsonConvert.SerializeObject(clipData)}");
+                   $"{nameof(HostClipWithDetailsAsync)} called with clipUrl: {clipUrl}, clipData: {JsonConvert.SerializeObject(clipData)}");
 
         try {
             if (string.IsNullOrEmpty(clipUrl)) {
@@ -865,7 +826,8 @@ public class CPHInline : CPHInlineBase {
                 return;
             }
 
-            ConfigureAudioForPlayerSourceAsync().GetAwaiter().GetResult();
+            // Configure audio asynchronously
+            await ConfigureAudioForPlayerSourceAsync();
 
             LogMessage(LogLevel.Info, $"Setting 'Player' source to visible in scene '{cliparinoSceneName}'.");
             CPH.ObsSetSourceVisibility(cliparinoSceneName, playerSourceName, true);
@@ -874,35 +836,99 @@ public class CPHInline : CPHInlineBase {
             var clipInfo = ExtractClipInfo(clipData);
 
             LogMessage(LogLevel.Info, "Creating and hosting clip page with details.");
-            CreateAndHostClipPage(clipUrl, clipInfo.StreamerName, clipInfo.ClipTitle, clipInfo.CuratorName, clipData);
+            await CreateAndHostClipPageAsync(clipUrl,
+                                             clipInfo.StreamerName,
+                                             clipInfo.ClipTitle,
+                                             clipInfo.CuratorName,
+                                             clipData);
 
-            LogMessage(LogLevel.Debug, "Starting task to auto-stop the clip playback after duration.");
-            LogMessage(LogLevel.Info, "Starting clip playback...");
-
-            Task.Run(async () => {
-                         try {
-                             CancelCurrentToken();
-
-                             using var cancellationTokenSource = _autoStopCancellationTokenSource;
-
-                             await Task.Delay(TimeSpan.FromSeconds(GetDurationWithSetupDelay(clipData.Duration)
-                                                                       .TotalSeconds),
-                                              cancellationTokenSource.Token);
-
-                             if (!cancellationTokenSource.Token.IsCancellationRequested) {
-                                 HandleStopCommand();
-                                 LogMessage(LogLevel.Info, "Auto-stop task completed successfully.");
-                             }
-                         } catch (OperationCanceledException) {
-                             LogMessage(LogLevel.Info, "Auto-stop task cancelled gracefully.");
-                         } catch (Exception ex) {
-                             LogMessage(LogLevel.Error, $"Unexpected error in auto-stop task: {ex.Message}");
-                         }
-                     });
+            LogMessage(LogLevel.Debug, "Starting auto-stop task for playback.");
+            await StartAutoStopTaskAsync(clipData.Duration);
         } catch (Exception ex) {
-            LogMessage(LogLevel.Error, $"{GetErrorMessage(nameof(HostClipWithDetails))}: {ex.Message}");
+            LogMessage(LogLevel.Error, $"{GetErrorMessage(nameof(HostClipWithDetailsAsync))}: {ex.Message}");
         } finally {
-            LogMessage(LogLevel.Debug, $"{nameof(HostClipWithDetails)} exiting.");
+            LogMessage(LogLevel.Debug, $"{nameof(HostClipWithDetailsAsync)} exiting.");
+        }
+    }
+
+    private async Task StartAutoStopTaskAsync(double duration) {
+        try {
+            CancelCurrentToken();
+
+            using var cancellationTokenSource = _autoStopCancellationTokenSource;
+
+            await Task.Delay(TimeSpan.FromSeconds(GetDurationWithSetupDelay((float)duration).TotalSeconds),
+                             cancellationTokenSource.Token);
+
+            if (!cancellationTokenSource.Token.IsCancellationRequested) {
+                HandleStopCommand();
+                LogMessage(LogLevel.Info, "Auto-stop task completed successfully.");
+            }
+        } catch (OperationCanceledException) {
+            LogMessage(LogLevel.Info, "Auto-stop task cancelled gracefully.");
+        } catch (Exception ex) {
+            LogMessage(LogLevel.Error, $"Unexpected error in auto-stop task: {ex.Message}");
+        }
+    }
+
+    private async Task CreateAndHostClipPageAsync(string clipUrl,
+                                                  string streamerName,
+                                                  string clipTitle,
+                                                  string curatorName,
+                                                  ClipData clipData) {
+        LogMessage(LogLevel.Debug,
+                   $"{nameof(CreateAndHostClipPageAsync)} called with clipUrl: {clipUrl}, streamerName: {streamerName}, "
+                   + $"clipTitle: {clipTitle}, curatorName: {curatorName}, clipData: {JsonConvert.SerializeObject(clipData)}");
+
+        try {
+            if (string.IsNullOrEmpty(clipUrl)) {
+                LogMessage(LogLevel.Error, "clipUrl cannot be null or empty. Ensure it is passed correctly.");
+
+                return;
+            }
+
+            LogMessage(LogLevel.Debug, "Extracting clip ID from clipUrl.");
+            var clipId = ExtractClipId(clipUrl);
+
+            if (string.IsNullOrEmpty(clipId)) {
+                LogMessage(LogLevel.Error, $"Failed to extract Clip ID from clipUrl: {clipUrl}");
+
+                return;
+            }
+
+            LogMessage(LogLevel.Info, $"Extracted Clip ID: {clipId}");
+
+            // Start fetching the game name early
+            var fetchGameNameTask = FetchGameNameAsync(clipData.GameId ?? "");
+
+            LogMessage(LogLevel.Debug, "Generating HTML content for clip page.");
+            _htmlInMemory = GenerateHtmlContent(clipId, streamerName, "Loading Game Name...", clipTitle, curatorName);
+
+            // Await fetching the game name
+            string gameName;
+
+            try {
+                gameName = await fetchGameNameTask;
+
+                if (string.IsNullOrEmpty(gameName)) {
+                    LogMessage(LogLevel.Warn, "Game name is null or empty. Using default value: 'Unknown Game'");
+                    gameName = "Unknown Game";
+                }
+            } catch (Exception ex) {
+                LogMessage(LogLevel.Error, $"Error while fetching game name: {ex.Message}");
+                gameName = "Unknown Game";
+            }
+
+            LogMessage(LogLevel.Info, $"Fetched game name: {gameName}");
+
+            LogMessage(LogLevel.Debug, "Configuring and serving the clip page.");
+            ConfigureAndServe();
+            LogMessage(LogLevel.Info, "Clip page hosted successfully.");
+        } catch (Exception ex) {
+            LogMessage(LogLevel.Error, $"Error occurred in {nameof(CreateAndHostClipPageAsync)}: {ex.Message}");
+            LogMessage(LogLevel.Debug, ex.StackTrace);
+        } finally {
+            LogMessage(LogLevel.Debug, $"{nameof(CreateAndHostClipPageAsync)} execution finished.");
         }
     }
 
@@ -1082,15 +1108,70 @@ public class CPHInline : CPHInlineBase {
             client.DefaultRequestHeaders.Add("Authorization", $"Bearer {clientSecret}");
 
             var response = await client.GetAsync(endpoint);
+
+            if (!response.IsSuccessStatusCode) {
+                Log(LogLevel.Error, $"Twitch API request failed: {response.ReasonPhrase}");
+
+                return default;
+            }
+
             var content = await response.Content.ReadAsStringAsync();
             var apiResponse = JsonConvert.DeserializeObject<TwitchApiResponse<T>>(content);
 
-            return apiResponse.Data != null && apiResponse.Data.Any() ? apiResponse.Data.First() : default;
+            return apiResponse?.Data != null && apiResponse.Data.Any() ? apiResponse.Data.First() : default;
         } catch (Exception ex) {
             Log(LogLevel.Error, $"{GetErrorMessage(nameof(FetchTwitchData))}: {ex.Message}");
 
             return default;
         }
+    }
+
+    private async Task<Clip> FetchClipById(string clipId) {
+        try {
+            LogMessage(LogLevel.Info, $"Fetching clip data for Clip ID: {clipId}");
+
+            var endpoint = $"https://api.twitch.tv/helix/clips?id={clipId}";
+            var clipData = await FetchTwitchData<ClipData>(endpoint);
+
+            if (clipData == null) throw new Exception($"No data was returned for Clip ID: {clipId}");
+
+            LogMessage(LogLevel.Debug, $"Creating Clip entity for Clip ID: {clipId}");
+
+            var clip = Clip.FromTwitchClip(clipData);
+
+            lock (_clipDataCache) {
+                _clipDataCache[clipId] = clip.ToClipData(this);
+            }
+
+            LogMessage(LogLevel.Info, $"Successfully fetched and cached clip data for Clip ID: {clipId}");
+
+            return clip;
+        } catch (Exception ex) {
+            LogError(nameof(FetchClipById), ex);
+
+            return null;
+        }
+    }
+
+    private async Task<string> FetchGameNameAsync(string gameId) {
+        if (string.IsNullOrEmpty(gameId)) {
+            LogMessage(LogLevel.Warn, "Game ID is empty or null. Returning 'Unknown Game'.");
+
+            return "Unknown Game";
+        }
+
+        try {
+            var endpoint = $"https://api.twitch.tv/helix/games?id={gameId}";
+            var gameData = await FetchTwitchData<GameData>(endpoint);
+
+            if (gameData == null || string.IsNullOrEmpty(gameData.Name)) return "Unknown Game";
+
+            return gameData.Name;
+        } catch (Exception ex) {
+            Log(LogLevel.Error, $"{GetErrorMessage(nameof(FetchGameNameAsync))}: {ex.Message}");
+        }
+
+        return "Unknown Game";
     }
 
     private async Task<ClipData> GetClipData(string clipUrl) {
@@ -1378,52 +1459,6 @@ public class CPHInline : CPHInlineBase {
         Log(LogLevel.Error, message);
     }
 
-    private void CreateAndHostClipPage(string clipUrl,
-                                       string streamerName,
-                                       string clipTitle,
-                                       string curatorName,
-                                       ClipData clipData) {
-        LogMessage(LogLevel.Debug,
-                   $"{nameof(CreateAndHostClipPage)} called with clipUrl: {clipUrl}, streamerName: {streamerName}, "
-                   + $"clipTitle: {clipTitle}, curatorName: {curatorName}, clipData: {JsonConvert.SerializeObject(clipData)}");
-
-        try {
-            if (string.IsNullOrEmpty(clipUrl)) {
-                LogMessage(LogLevel.Error, "clipUrl cannot be null or empty. Ensure it is passed correctly.");
-
-                return;
-            }
-
-            LogMessage(LogLevel.Debug, "Extracting clip ID from clipUrl.");
-            var clipId = ExtractClipId(clipUrl);
-
-            if (string.IsNullOrEmpty(clipId)) {
-                LogMessage(LogLevel.Error, $"Failed to extract Clip ID from clipUrl: {clipUrl}");
-
-                return;
-            }
-
-            LogMessage(LogLevel.Info, $"Extracted Clip ID: {clipId}");
-
-            LogMessage(LogLevel.Debug, "Fetching game name based on GameId in clipData.");
-            var gameName = FetchGameNameSync(clipData.GameId ?? "").Result;
-            LogMessage(LogLevel.Info, $"Fetched game name: {gameName}");
-
-            LogMessage(LogLevel.Debug, "Generating HTML content for clip page.");
-            _htmlInMemory = GenerateHtmlContent(clipId, streamerName, gameName, clipTitle, curatorName);
-            LogMessage(LogLevel.Info, "HTML content generated successfully.");
-
-            LogMessage(LogLevel.Debug, "Configuring and serving the clip page.");
-            ConfigureAndServe();
-            LogMessage(LogLevel.Info, "Clip page hosted successfully.");
-        } catch (Exception ex) {
-            LogMessage(LogLevel.Error, $"Error occurred in {nameof(CreateAndHostClipPage)}: {ex.Message}");
-            LogMessage(LogLevel.Debug, ex.StackTrace);
-        } finally {
-            LogMessage(LogLevel.Debug, $"{nameof(CreateAndHostClipPage)} execution finished.");
-        }
-    }
-
     private static string ExtractClipId(string clipUrl) {
         if (string.IsNullOrEmpty(clipUrl)) throw new ArgumentException("Clip URL cannot be null or empty.");
 
@@ -1618,36 +1653,6 @@ public class CPHInline : CPHInlineBase {
             StopServer(server);
             DisposeServer(server);
         }
-    }
-
-    private async Task<string> FetchGameNameSync(string gameId) {
-        if (string.IsNullOrEmpty(gameId)) {
-            LogMessage(LogLevel.Warn, "Game ID is empty or null. Value: 'null'.");
-
-            return "Unknown Game";
-        }
-
-        var clientId = CPH.TwitchClientId;
-        var clientSecret = CPH.TwitchOAuthToken;
-
-        try {
-            using var client = new HttpClient();
-
-            client.DefaultRequestHeaders.Add("Client-ID", clientId);
-            client.DefaultRequestHeaders.Add("Authorization", $"Bearer {clientSecret}");
-
-            var response = await client.GetAsync($"https://api.twitch.tv/helix/games?id={gameId}");
-            var content = await response.Content.ReadAsStringAsync();
-
-            var apiResponse = JsonConvert.DeserializeObject<TwitchApiResponse<GameData>>(content);
-
-            if (apiResponse.Data != null && apiResponse.Data.Any())
-                return apiResponse.Data.First().Name ?? "Unknown Game";
-        } catch (Exception ex) {
-            Log(LogLevel.Error, $"{GetErrorMessage("FetchGameNameSync")}: {ex.Message}");
-        }
-
-        return "Unknown Game";
     }
 
     ~CPHInline() {
@@ -1911,8 +1916,8 @@ public class CPHInline : CPHInlineBase {
     }
 
     private interface IPayload {
-        public string RequestType { get; set; }
-        public object RequestData { get; set; }
+        public string RequestType { get; }
+        public object RequestData { get; }
     }
 
     private class Payload : IPayload {
