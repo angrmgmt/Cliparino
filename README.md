@@ -27,12 +27,12 @@ Has feature parity with other popular clip players, including:
 - Either `!watch <clip-link>` or `!watch` after a clip link has been posted in chat will play the clip. If it doesn't
   exist already, a scene and source will be created and included in your current scene. This scene source can be
   copy/pasted to other scenes as desired.
-- [WIP] If multiple clips are enqueued by sequential commands in chat, they will play in order.
-- [WIP] Shoutouts also have their own queue, and will play in the order they are received.
+- If multiple clips are enqueued by sequential commands in chat, they will play in order.
+- Shoutouts also have their own queue, and will play in the order they are received.
 
 ### Shoutouts
 
-- `!shoutout <username>` will play a random clip from the specified user's Twitch channel, starting with Featured clips,
+- `!so <username>` will play a random clip from the specified user's Twitch channel, starting with Featured clips,
   then moving to a configurable set of ranges. This can be set to fire automatically when a raid is detected, which is
   the default. See the last item in [Settings](#settings)
 
