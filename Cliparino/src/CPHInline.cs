@@ -20,6 +20,7 @@
 #region
 
 // ReSharper disable RedundantUsingDirective
+using System.Diagnostics;
 using Microsoft.CSharp;
 using Microsoft.CSharp.RuntimeBinder;
 using System;
@@ -157,11 +158,14 @@ public class CPHInline : CPHInlineBase {
         }
     };
 
-    private readonly Dictionary<string, ClipData> _clipDataCache = new();
+    private static readonly object ServerLock = new();
+    private static string _htmlInMemory;
 
-    private readonly object _serverLock = new();
+    private readonly Dictionary<string, ClipData> _clipDataCache = new();
     private CancellationTokenSource _autoStopCancellationTokenSource;
-    private string _htmlInMemory;
+
+    private CancellationTokenSource _cancellationTokenSource = new();
+    private Task _listeningTask;
     private bool _loggingEnabled;
     private HttpListener _server;
 
@@ -189,15 +193,8 @@ public class CPHInline : CPHInlineBase {
     ///     `!watch`, `!so`, `!replay`, or `!stop` to control playback of Twitch clips and OBS overlay behavior.
     /// </remarks>
     /// <returns>
-    ///     A boolean indicating whether the script executed successfully. Returns
-    ///     <c>
-    ///         true
-    ///     </c>
-    ///     if execution succeeded; otherwise,
-    ///     <c>
-    ///         false
-    ///     </c>
-    ///     .
+    ///     A boolean indicating whether the script executed successfully. Returns <c>true</c> if execution succeeded;
+    ///     otherwise, <c>false</c>.
     /// </returns>
     public bool Execute() {
         Log(LogLevel.Debug, $"{nameof(Execute)} for Cliparino started.");
@@ -879,7 +876,7 @@ public class CPHInline : CPHInlineBase {
             Log(LogLevel.Info, $"Fetched game name: {gameName}");
 
             Log(LogLevel.Debug, "Configuring and serving the clip page.");
-            ConfigureAndServe();
+            await ConfigureAndServe();
             Log(LogLevel.Info, "Clip page hosted successfully.");
         } catch (Exception ex) {
             Log(LogLevel.Error, $"Error occurred in {nameof(CreateAndHostClipPageAsync)}: {ex.Message}");
@@ -1067,6 +1064,8 @@ public class CPHInline : CPHInlineBase {
 
             if (!response.IsSuccessStatusCode) {
                 Log(LogLevel.Error, $"Twitch API request failed: {response.ReasonPhrase}");
+                Log(LogLevel.Debug,
+                    $"Requested data from {endpoint} using clientId: {clientId} and clientSecret: {clientSecret.Replace('c', 'x')}");
 
                 return default;
             }
@@ -1440,27 +1439,29 @@ public class CPHInline : CPHInlineBase {
         return htmlContent;
     }
 
-    private void ConfigureAndServe() {
+    private async Task ConfigureAndServe() {
         try {
-            lock (_serverLock) {
-                CleanupServer();
-                _server ??= new HttpListener();
+            await CleanupServer();
 
-                if (!IsPortAvailable(8080)) throw new InvalidOperationException("Port 8080 is already in use.");
+            if (!IsPortAvailable(8080)) throw new InvalidOperationException("Port 8080 is already in use.");
+
+            lock (ServerLock) {
+                _server ??= new HttpListener();
 
                 _server.Prefixes.Add("http://localhost:8080/");
                 _server.Start();
-                StartListening(_server);
+                _cancellationTokenSource = new CancellationTokenSource();
+                _listeningTask = StartListening(_server, _cancellationTokenSource.Token);
 
                 UpdateBrowserSource("Cliparino", "Player", "http://localhost:8080/index.htm");
                 RefreshBrowserSource();
             }
         } catch (HttpListenerException ex) {
             Log(LogLevel.Error, $"Failed to start HttpListener on port 8080: {ex.Message}");
-            CleanupServer();
+            await CleanupServer();
         } catch (Exception ex) {
             Log(LogLevel.Error, $"Unexpected error in ConfigureAndStartServer: {ex.Message}");
-            CleanupServer();
+            await CleanupServer();
         }
     }
 
@@ -1474,8 +1475,10 @@ public class CPHInline : CPHInlineBase {
         return nonce;
     }
 
-    private static bool IsPortAvailable(int port) {
+    private bool IsPortAvailable(int port) {
         try {
+            IdentifyPortConflict(port);
+
             var listener = new TcpListener(IPAddress.Loopback, port);
 
             listener.Start();
@@ -1487,75 +1490,103 @@ public class CPHInline : CPHInlineBase {
         }
     }
 
-    private void StartListening(HttpListener server) {
-        Task.Run(async () => {
-                     HttpListenerResponse response = null;
+    private void IdentifyPortConflict(int port) {
+        var processChecker = new Process();
+        var startInfo = new ProcessStartInfo {
+            FileName = "cmd.exe",
+            Arguments = $"/C netstat -aon | findstr :{port}",
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
 
-                     try {
-                         Log(LogLevel.Info, "HTTP server started on http://localhost:8080");
+        processChecker.StartInfo = startInfo;
+        processChecker.Start();
 
-                         while (server.IsListening) {
-                             var context = await server.GetContextAsync();
+        var output = processChecker.StandardOutput.ReadToEnd();
 
-                             response = context.Response;
+        processChecker.WaitForExit();
 
-                             var requestPath = context.Request.Url?.AbsolutePath;
-                             var nonce = ApplyCORSHeaders(response);
-
-                             string responseText;
-                             string contentType;
-                             var htmlInMemory = GetHtmlInMemorySafe().Replace("[[nonce]]", nonce);
-
-                             switch (requestPath) {
-                                 case "/index.css":
-                                     contentType = "text/css; charset=utf-8";
-                                     responseText = CSSText;
-
-                                     break;
-
-                                 case "/":
-                                 case "/index.htm":
-                                     contentType = "text/html; charset=utf-8";
-                                     responseText = htmlInMemory;
-
-                                     break;
-
-                                 default:
-                                     responseText = "404 Not Found";
-                                     contentType = "text/plain; charset=utf-8";
-                                     response.StatusCode = 404;
-
-                                     break;
-                             }
-
-                             var responseBytes = Encoding.UTF8.GetBytes(responseText);
-
-                             response.ContentType = contentType;
-                             response.ContentLength64 = responseBytes.Length;
-
-                             await response.OutputStream.WriteAsync(responseBytes, 0, responseBytes.Length);
-
-                             response.OutputStream.Close();
-                         }
-                     } catch (HttpListenerException ex) {
-                         Log(LogLevel.Error, $"HttpListener error: {ex.Message}");
-                     } catch (Exception ex) {
-                         Log(LogLevel.Error, $"Error in StartListening: {ex.Message}");
-                     } finally {
-                         response?.OutputStream.Close();
-                     }
-                 });
+        if (!string.IsNullOrEmpty(output)) {
+            Log(LogLevel.Warn, $"Conflict detected on port {port}:");
+            Log(LogLevel.Warn, output);
+            Log(LogLevel.Warn, "To resolve, terminate the specific process shown.");
+        } else {
+            Log(LogLevel.Info, $"Port {port} is currently free and usable.");
+        }
     }
 
-    private string GetHtmlInMemorySafe() {
-        lock (_serverLock) {
+    private async Task StartListening(HttpListener server, CancellationToken cancellationToken) {
+        HttpListenerResponse response = null;
+
+        try {
+            Log(LogLevel.Info, "HTTP server started on http://localhost:8080");
+
+            while (server.IsListening && !cancellationToken.IsCancellationRequested) {
+                var context = await server.GetContextAsync();
+
+                response = context.Response;
+
+                var requestPath = context.Request.Url?.AbsolutePath;
+                var nonce = ApplyCORSHeaders(response);
+
+                string responseText;
+                string contentType;
+                var htmlInMemory = GetHtmlInMemorySafe().Replace("[[nonce]]", nonce);
+
+                switch (requestPath) {
+                    case "/index.css":
+                        contentType = "text/css; charset=utf-8";
+                        responseText = CSSText;
+
+                        break;
+
+                    case "/":
+                    case "/index.htm":
+                        contentType = "text/html; charset=utf-8";
+                        responseText = htmlInMemory;
+
+                        break;
+
+                    default:
+                        responseText = "404 Not Found";
+                        contentType = "text/plain; charset=utf-8";
+                        response.StatusCode = 404;
+
+                        break;
+                }
+
+                await WriteResponse(responseText, response, contentType);
+            }
+        } catch (HttpListenerException ex) {
+            Log(LogLevel.Error, $"HttpListener error: {ex.Message}");
+        } catch (Exception ex) {
+            Log(LogLevel.Error, $"Error in StartListening: {ex.Message}");
+        } finally {
+            response?.OutputStream.Close();
+        }
+    }
+
+    private async Task WriteResponse(string responseText, HttpListenerResponse response, string contentType) {
+        var responseBytes = Encoding.UTF8.GetBytes(responseText);
+
+        response.ContentType = contentType;
+        response.ContentLength64 = responseBytes.Length;
+
+        await response.OutputStream.WriteAsync(responseBytes, 0, responseBytes.Length);
+
+        response.OutputStream.Close();
+    }
+
+    private static string GetHtmlInMemorySafe() {
+        lock (ServerLock) {
             return _htmlInMemory;
         }
     }
 
     private void DisposeServer(HttpListener server = null) {
         try {
-            lock (_serverLock) {
+            lock (ServerLock) {
                 server ??= _server;
             }
 
@@ -1567,14 +1598,14 @@ public class CPHInline : CPHInlineBase {
         } catch (Exception ex) {
             Log(LogLevel.Error, $"Error while disposing HttpListener: {ex.Message}");
         } finally {
-            lock (_serverLock) {
+            lock (ServerLock) {
                 _server = null;
             }
         }
     }
 
     private void StopServer(HttpListener server = null) {
-        lock (_serverLock) {
+        lock (ServerLock) {
             server ??= _server;
 
             if (server == null) return;
@@ -1591,19 +1622,40 @@ public class CPHInline : CPHInlineBase {
         }
     }
 
-    private void CleanupServer(HttpListener server = null) {
-        lock (_serverLock) {
-            server ??= _server;
+    private async Task CleanupServer(HttpListener server = null) {
+        HttpListener serverLocal;
 
-            if (server == null) return;
-
-            StopServer(server);
-            DisposeServer(server);
+        lock (ServerLock) {
+            _cancellationTokenSource.Cancel();
+            serverLocal = server ?? _server;
+            _server = null;
         }
+
+        if (_listeningTask != null)
+            try {
+                await _listeningTask;
+            } catch (OperationCanceledException) {
+                Log(LogLevel.Info, "Listening task was canceled.");
+            } catch (Exception ex) {
+                Log(LogLevel.Error, $"Error cleaning up: {ex.Message}");
+            }
+
+        if (serverLocal == null) return;
+
+        StopServer(serverLocal);
+        DisposeServer(serverLocal);
+    }
+
+    public void Dispose() {
+        DisposeAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+    }
+
+    private async Task DisposeAsync() {
+        await CleanupServer();
     }
 
     ~CPHInline() {
-        CleanupServer();
+        DisposeServer();
     }
 
     private void Log(LogLevel level, string messageBody, [CallerMemberName] string caller = "") {
@@ -1723,17 +1775,13 @@ public class CPHInline : CPHInlineBase {
         public bool IsFeatured { get; set; }
 
         /// <summary>
-        ///     Creates a
-        ///     <see cref="Clip" />
-        ///     object from a Twitch clip's raw JSON data.
+        ///     Creates a <see cref="Clip" /> object from a Twitch clip's raw JSON data.
         /// </summary>
         /// <param name="twitchClip">
         ///     A JSON object representing the raw Twitch clip data.
         /// </param>
         /// <returns>
-        ///     An instance of the
-        ///     <see cref="Clip" />
-        ///     class with data populated from Twitch.
+        ///     An instance of the <see cref="Clip" /> class with data populated from Twitch.
         /// </returns>
         /// <exception cref="InvalidOperationException">
         ///     Thrown if the provided JSON object is invalid or null.
@@ -1763,28 +1811,16 @@ public class CPHInline : CPHInlineBase {
         }
 
         /// <summary>
-        ///     Creates a
-        ///     <see cref="Clip" />
-        ///     object from a
-        ///     <see cref="ClipData" />
-        ///     instance.
+        ///     Creates a <see cref="Clip" /> object from a <see cref="ClipData" /> instance.
         /// </summary>
         /// <param name="twitchClipData">
-        ///     An instance of the
-        ///     <see cref="ClipData" />
-        ///     class populated with clip information.
+        ///     An instance of the <see cref="ClipData" /> class populated with clip information.
         /// </param>
         /// <returns>
-        ///     An instance of
-        ///     <see cref="Clip" />
-        ///     created from the
-        ///     <see cref="ClipData" />
-        ///     .
+        ///     An instance of <see cref="Clip" /> created from the <see cref="ClipData" /> .
         /// </returns>
         /// <exception cref="InvalidOperationException">
-        ///     Thrown if the
-        ///     <see cref="ClipData" />
-        ///     is invalid or null.
+        ///     Thrown if the <see cref="ClipData" /> is invalid or null.
         /// </exception>
         public static Clip FromTwitchClip(ClipData twitchClipData) {
             if (twitchClipData != null)
@@ -1811,23 +1847,14 @@ public class CPHInline : CPHInlineBase {
         }
 
         /// <summary>
-        ///     Converts the
-        ///     <see cref="Clip" />
-        ///     object into a
-        ///     <see cref="ClipData" />
-        ///     representation for interaction with other parts of the system.
+        ///     Converts the <see cref="Clip" /> object into a <see cref="ClipData" /> representation for interaction with other
+        ///     parts of the system.
         /// </summary>
         /// <param name="cphInstance">
-        ///     A reference to the parent
-        ///     <see cref="CPHInline" />
-        ///     instance.
+        ///     A reference to the parent <see cref="CPHInline" /> instance.
         /// </param>
         /// <returns>
-        ///     A new
-        ///     <see cref="ClipData" />
-        ///     object populated with data from this
-        ///     <see cref="Clip" />
-        ///     instance.
+        ///     A new <see cref="ClipData" /> object populated with data from this <see cref="Clip" /> instance.
         /// </returns>
         public ClipData ToClipData(IInlineInvokeProxy cphInstance) {
             try {
