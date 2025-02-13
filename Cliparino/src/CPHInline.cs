@@ -20,6 +20,7 @@
 #region
 
 // ReSharper disable RedundantUsingDirective
+using System.Net.NetworkInformation;
 using System.Diagnostics;
 using Microsoft.CSharp;
 using Microsoft.CSharp.RuntimeBinder;
@@ -165,9 +166,20 @@ public class CPHInline : CPHInlineBase {
     private CancellationTokenSource _autoStopCancellationTokenSource;
 
     private CancellationTokenSource _cancellationTokenSource = new();
+    private ClipManager _clipManager;
+    private HttpClient _httpClient;
     private Task _listeningTask;
     private bool _loggingEnabled;
     private HttpListener _server;
+    private TwitchApiClient _twitchApiClient;
+
+    [SuppressMessage("ReSharper", "UnusedMember.Global")]
+    public void Init() {
+        _httpClient = new HttpClient();
+        _twitchApiClient =
+            new TwitchApiClient(_httpClient, new OAuthInfo(CPH.TwitchClientId, CPH.TwitchOAuthToken), Log);
+        _clipManager = new ClipManager(_twitchApiClient, Log);
+    }
 
     private void CancelCurrentToken() {
         _autoStopCancellationTokenSource?.Cancel();
@@ -258,11 +270,21 @@ public class CPHInline : CPHInlineBase {
 
             url = ValidateClipUrl(url, null);
 
-            if (string.IsNullOrEmpty(url)) {
+            if (string.IsNullOrWhiteSpace(url)) {
                 Log(LogLevel.Warn, "No valid clip URL provided. Aborting command.");
 
                 return;
             }
+
+            var clipData = await _clipManager.GetClipData(url);
+
+            if (clipData == null) {
+                Log(LogLevel.Error, "Failed to retrieve clip data.");
+
+                return;
+            }
+
+            Log(LogLevel.Info, $"Now playing: {clipData.Title} clipped by {clipData.CreatorName}");
 
             LogBrowserSourceSetup(url, width, height);
 
@@ -276,7 +298,7 @@ public class CPHInline : CPHInlineBase {
 
             await PrepareSceneForClipHostingAsync(currentScene);
 
-            await ProcessAndHostClipDataAsync(url, null);
+            await ProcessAndHostClipDataAsync(url, clipData);
         } catch (Exception ex) {
             Log(LogLevel.Error, ex.Message);
         }
@@ -314,6 +336,7 @@ public class CPHInline : CPHInlineBase {
 
             if (!SourceExistsInScene(currentScene, sourceName)) {
                 Log(LogLevel.Info, $"Source '{sourceName}' does not exist in scene '{currentScene}'. Adding it...");
+
                 var sourceUrl = CreateSourceUrl("http://localhost:8080/index.htm");
 
                 try {
@@ -322,6 +345,7 @@ public class CPHInline : CPHInlineBase {
                         UpdateBrowserSource("Cliparino", "Player", sourceUrl);
 
                         var loadedUrl = GetCurrentSourceUrl("Cliparino", "Player");
+
                         Log(LogLevel.Info, $"Browser source 'Player' current URL: {loadedUrl}");
                         RefreshBrowserSource();
                     } else {
@@ -345,6 +369,7 @@ public class CPHInline : CPHInlineBase {
                         $"Browser source '{sourceName}' updated successfully in scene '{currentScene}'.");
 
                     var loadedUrl = GetCurrentSourceUrl("Cliparino", "Player");
+
                     Log(LogLevel.Info, $"Browser source 'Player' current URL: {loadedUrl}");
                     RefreshBrowserSource();
                 } catch (Exception ex) {
@@ -373,7 +398,7 @@ public class CPHInline : CPHInlineBase {
                 }
 
                 Log(LogLevel.Debug, $"Fetching Twitch data for Game ID: {gameId}");
-                await FetchTwitchData<GameData>($"https://api.twitch.tv/helix/games?id={gameId}");
+                await _twitchApiClient.FetchGameById($"https://api.twitch.tv/helix/games?id={gameId}");
                 Log(LogLevel.Info, "Twitch data fetched successfully.");
             } catch (Exception ex) {
                 Log(LogLevel.Error, $"Error fetching clip data or Twitch data: {ex.Message}");
@@ -704,7 +729,6 @@ public class CPHInline : CPHInlineBase {
         Log(LogLevel.Debug,
             $"FetchValidClipDataWithCache called with clipData: {JsonConvert.SerializeObject(clipData)}, clipUrl: {clipUrl}");
 
-
         lock (_clipDataCache) {
             if (_clipDataCache.TryGetValue(clipUrl, out var cachedClipData)) return cachedClipData;
         }
@@ -718,7 +742,9 @@ public class CPHInline : CPHInlineBase {
                 return null;
             }
 
-            var clipId = ExtractClipIdFromUrl(clipUrl);
+            clipData = await _clipManager.GetClipData(clipUrl);
+
+            var clipId = clipData?.Id;
 
             if (string.IsNullOrEmpty(clipId)) {
                 Log(LogLevel.Error, $"Invalid clip ID extracted from URL: {clipUrl}");
@@ -752,21 +778,6 @@ public class CPHInline : CPHInlineBase {
         clipData = await FetchClipDataIfNeeded(clipData, clipUrl);
 
         return clipData;
-    }
-
-    private string ExtractClipIdFromUrl(string clipUrl) {
-        if (string.IsNullOrEmpty(clipUrl)) return null;
-
-        try {
-            var uri = new Uri(clipUrl);
-
-            if (uri.Host.IndexOf("twitch.tv", StringComparison.OrdinalIgnoreCase) >= 0)
-                return uri.Segments.LastOrDefault()?.Trim('/');
-        } catch (Exception ex) {
-            Log(LogLevel.Error, ex.Message);
-        }
-
-        return null;
     }
 
     private async Task HostClipWithDetailsAsync(string clipUrl, ClipData clipData) {
@@ -846,7 +857,19 @@ public class CPHInline : CPHInlineBase {
             }
 
             Log(LogLevel.Debug, "Extracting clip ID from clipUrl.");
-            var clipId = ExtractClipId(clipUrl);
+
+            if (clipData == null) {
+                Log(LogLevel.Warn, "clipData is null. Attempting to fetch clip data using clipUrl.");
+                clipData = await _clipManager.GetClipData(clipUrl);
+
+                if (clipData == null) {
+                    Log(LogLevel.Error, ConstClipDataError);
+
+                    return;
+                }
+            }
+
+            var clipId = clipData.Id;
 
             if (string.IsNullOrEmpty(clipId)) {
                 Log(LogLevel.Error, $"Failed to extract Clip ID from clipUrl: {clipUrl}");
@@ -1047,46 +1070,12 @@ public class CPHInline : CPHInlineBase {
         return TimeSpan.FromSeconds(durationInSeconds + AdditionalHtmlSetupDelaySeconds);
     }
 
-    private async Task<T> FetchTwitchData<T>(string endpoint) {
-        var clientId = CPH.TwitchClientId;
-        var clientSecret = CPH.TwitchOAuthToken;
-
-        try {
-            if (string.IsNullOrEmpty(clientSecret))
-                throw new InvalidOperationException("Twitch client secret is missing or invalid.");
-
-            using var client = new HttpClient();
-
-            client.DefaultRequestHeaders.Add("Client-ID", clientId);
-            client.DefaultRequestHeaders.Add("Authorization", $"Bearer {clientSecret}");
-
-            var response = await client.GetAsync(endpoint);
-
-            if (!response.IsSuccessStatusCode) {
-                Log(LogLevel.Error, $"Twitch API request failed: {response.ReasonPhrase}");
-                Log(LogLevel.Debug,
-                    $"Requested data from {endpoint} using clientId: {clientId} and clientSecret: {clientSecret.Replace('c', 'x')}");
-
-                return default;
-            }
-
-            var content = await response.Content.ReadAsStringAsync();
-            var apiResponse = JsonConvert.DeserializeObject<TwitchApiResponse<T>>(content);
-
-            return apiResponse?.Data != null && apiResponse.Data.Any() ? apiResponse.Data.First() : default;
-        } catch (Exception ex) {
-            Log(LogLevel.Error, $"{GetErrorMessagePreamble(nameof(FetchTwitchData))}: {ex.Message}");
-
-            return default;
-        }
-    }
-
     private async Task<Clip> FetchClipById(string clipId) {
         try {
             Log(LogLevel.Info, $"Fetching clip data for Clip ID: {clipId}");
 
             var endpoint = $"https://api.twitch.tv/helix/clips?id={clipId}";
-            var clipData = await FetchTwitchData<ClipData>(endpoint);
+            var clipData = await _clipManager.GetClipData(endpoint);
 
             if (clipData == null) throw new Exception($"No data was returned for Clip ID: {clipId}");
 
@@ -1116,8 +1105,7 @@ public class CPHInline : CPHInlineBase {
         }
 
         try {
-            var endpoint = $"https://api.twitch.tv/helix/games?id={gameId}";
-            var gameData = await FetchTwitchData<GameData>(endpoint);
+            var gameData = await _twitchApiClient.FetchGameById(gameId);
 
             if (gameData == null || string.IsNullOrEmpty(gameData.Name)) return "Unknown Game";
 
@@ -1132,7 +1120,7 @@ public class CPHInline : CPHInlineBase {
     private async Task<ClipData> GetClipData(string clipUrl) {
         var clipId = clipUrl.Substring(clipUrl.LastIndexOf("/", StringComparison.Ordinal) + 1);
 
-        return await FetchTwitchData<ClipData>($"https://api.twitch.tv/helix/clips?id={clipId}");
+        return await _clipManager.GetClipData($"https://api.twitch.tv/helix/clips?id={clipId}");
     }
 
     private async Task<string> EnsureCliparinoInCurrentSceneAsync(string currentScene, string clipUrl) {
@@ -1150,11 +1138,10 @@ public class CPHInline : CPHInlineBase {
             Log(LogLevel.Error, $"Error in EnsureCliparinoInCurrentSceneAsync: {ex.Message}");
         }
 
-
         try {
             var clipData = await GetClipData(clipUrl);
             var gameId = clipData?.GameId;
-            var gameData = await FetchTwitchData<GameData>($"https://api.twitch.tv/helix/games?id={gameId}");
+            var gameData = await _twitchApiClient.FetchGameById(gameId);
 
             return gameData?.Name ?? "Unknown Game";
         } catch (Exception ex) {
@@ -1405,14 +1392,6 @@ public class CPHInline : CPHInlineBase {
                       .Substring(0, Math.Min(16, Guid.NewGuid().ToByteArray().Length));
     }
 
-    private static string ExtractClipId(string clipUrl) {
-        if (string.IsNullOrEmpty(clipUrl)) throw new ArgumentException("Clip URL cannot be null or empty.");
-
-        var parts = clipUrl.Split('/');
-
-        return parts.LastOrDefault(); // Return the last segment, which is the clip ID
-    }
-
     private string GenerateHtmlContent(string clipId,
                                        string streamerName,
                                        string gameName,
@@ -1491,29 +1470,18 @@ public class CPHInline : CPHInlineBase {
     }
 
     private void IdentifyPortConflict(int port) {
-        var processChecker = new Process();
-        var startInfo = new ProcessStartInfo {
-            FileName = "cmd.exe",
-            Arguments = $"/C netstat -aon | findstr :{port}",
-            RedirectStandardOutput = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+        var ipGlobalProperties = IPGlobalProperties.GetIPGlobalProperties();
+        var activeTcpListeners = ipGlobalProperties.GetActiveTcpListeners();
+        var activeTcpConnections = ipGlobalProperties.GetActiveTcpConnections();
 
-        processChecker.StartInfo = startInfo;
-        processChecker.Start();
+        var isPortInUse = activeTcpListeners.Any(endpoint => endpoint.Port == port)
+                          || activeTcpConnections.Any(connection => connection.LocalEndPoint.Port == port);
 
-        var output = processChecker.StandardOutput.ReadToEnd();
-
-        processChecker.WaitForExit();
-
-        if (!string.IsNullOrEmpty(output)) {
-            Log(LogLevel.Warn, $"Conflict detected on port {port}:");
-            Log(LogLevel.Warn, output);
-            Log(LogLevel.Warn, "To resolve, terminate the specific process shown.");
-        } else {
+        if (isPortInUse)
+            Log(LogLevel.Warn,
+                $"Conflict detected on port {port}. This port is currently in use. Check active processes or services.");
+        else
             Log(LogLevel.Info, $"Port {port} is currently free and usable.");
-        }
     }
 
     private async Task StartListening(HttpListener server, CancellationToken cancellationToken) {
@@ -1674,11 +1642,115 @@ public class CPHInline : CPHInlineBase {
         }
     }
 
+    private delegate void LogDelegate(LogLevel level, string messageBody, [CallerMemberName] string caller = "");
+
     private enum LogLevel {
         Debug,
         Info,
         Warn,
         Error
+    }
+
+    private class OAuthInfo(string twitchClientId, string twitchOAuthToken) {
+        public string TwitchClientId { get; } = twitchClientId;
+        public string TwitchOAuthToken { get; } = twitchOAuthToken;
+    }
+
+    private class TwitchApiClient {
+        private readonly HttpClient _httpClient;
+        private readonly LogDelegate _log;
+        private readonly string _twitchClientId;
+        private readonly string _twitchOAuthToken;
+
+        public TwitchApiClient(HttpClient httpClient, OAuthInfo oAuthInfo, LogDelegate log) {
+            _httpClient = httpClient;
+            _httpClient.BaseAddress = new Uri("https://api.twitch.tv/helix/");
+            _log = log;
+            _twitchClientId = oAuthInfo.TwitchClientId;
+            _twitchOAuthToken = oAuthInfo.TwitchOAuthToken;
+        }
+
+        public async Task<T> FetchDataAsync<T>(string endpoint) {
+            try {
+                if (string.IsNullOrEmpty(_twitchOAuthToken))
+                    throw new InvalidOperationException("Twitch client secret is missing or invalid.");
+
+                var printEndpoint = endpoint;
+
+                if (endpoint.StartsWith("games") || endpoint.StartsWith("users"))
+                    printEndpoint = new Uri(_httpClient.BaseAddress, endpoint).ToString();
+
+                _log(LogLevel.Debug, $"Fetching data from endpoint '{printEndpoint}'.");
+
+                _httpClient.DefaultRequestHeaders.Clear();
+                _httpClient.DefaultRequestHeaders.Add("Client-ID", _twitchClientId);
+                _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {_twitchOAuthToken}");
+
+                var response = await _httpClient.GetAsync(endpoint);
+
+                if (!response.IsSuccessStatusCode) {
+                    _log(LogLevel.Error, $"Twitch API request failed: {response.ReasonPhrase}");
+                    _log(LogLevel.Debug,
+                         $"Requested sent to {printEndpoint} with clientId: {_twitchClientId} + matching clientSecret");
+
+                    return default;
+                }
+
+                var content = await response.Content.ReadAsStringAsync();
+                var apiResponse = JsonConvert.DeserializeObject<TwitchApiResponse<T>>(content);
+
+                return apiResponse is { Data.Length: > 0 } ? apiResponse.Data[0] : default;
+            } catch (Exception ex) {
+                _log(LogLevel.Error, $"{GetErrorMessagePreamble(nameof(FetchDataAsync))}: {ex.Message}");
+
+                return default;
+            }
+        }
+
+        public Task<ClipData> FetchClipById(string clipId) {
+            return FetchDataAsync<ClipData>($"clips?id={clipId}");
+        }
+
+        public Task<GameInfo> FetchGameById(string gameId) {
+            return FetchDataAsync<GameInfo>($"games?id={gameId}");
+        }
+    }
+
+    private class ClipManager(TwitchApiClient twitchApiClient, LogDelegate log) {
+        private readonly Dictionary<string, ClipData> _clipCache = new();
+
+        public async Task<ClipData> GetClipData(string clipUrl) {
+            var clipId = ExtractClipId(clipUrl);
+
+            if (string.IsNullOrEmpty(clipId)) throw new ArgumentException("Invalid clip URL");
+
+            if (_clipCache.TryGetValue(clipId, out var cachedClip)) return cachedClip;
+
+            var clip = await twitchApiClient.FetchClipById(clipId);
+
+            if (clip != null) _clipCache[clipId] = clip;
+
+            return clip;
+        }
+
+        private string ExtractClipId(string clipUrl) {
+            if (string.IsNullOrEmpty(clipUrl)) throw new ArgumentException("Clip URL cannot be null or empty.");
+
+            try {
+                var uri = new Uri(clipUrl);
+
+                if (uri.Host.IndexOf("twitch.tv", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return uri.Segments.LastOrDefault()?.Trim('/');
+            } catch (UriFormatException) {
+                var parts = clipUrl.Split('/');
+
+                return parts.LastOrDefault()?.Trim('/');
+            } catch (Exception ex) {
+                log(LogLevel.Error, ex.Message);
+            }
+
+            return null;
+        }
     }
 
     private class ClipSettings(bool featuredOnly, int maxClipSeconds, int clipAgeDays) {
