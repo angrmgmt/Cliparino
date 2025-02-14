@@ -45,6 +45,10 @@
         <Compile Remove="Cliparino\obj\Debug\net8.0\.NETCoreApp,Version=v8.0.AssemblyAttributes.cs"/>
         <Compile Remove="Cliparino\src\Utilities\CPH.cs"/>
         <Compile Remove="Cliparino\src\Utilities\OBSManager.cs"/>
+        <Compile Remove="Cliparino2\**"/>
+        <Compile Remove="Cliparino\obj\Debug\net8.0\.NETCoreApp,Version=v8.0.AssemblyAttributes.cs"/>
+        <Compile Remove="Cliparino\src\Utilities\CPH.cs"/>
+        <Compile Remove="Cliparino\src\Utilities\OBSManager.cs"/>
     </ItemGroup>
     <ItemGroup>
         <Folder Include="src\Utilities\"/>
@@ -52,6 +56,10 @@
     </ItemGroup>
     <ItemGroup>
         <None Remove="Cliparino.csproj.DotSettings"/>
+        <None Remove="Cliparino2\**"/>
+    </ItemGroup>
+    <ItemGroup>
+        <EmbeddedResource Remove="Cliparino2\**"/>
         <None Remove="Cliparino2\**"/>
     </ItemGroup>
     <ItemGroup>
