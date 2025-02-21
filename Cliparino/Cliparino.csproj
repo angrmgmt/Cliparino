@@ -1,36 +1,35 @@
 <Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
-        <StartupObject>Cliparino.MainClass</StartupObject>
         <TargetFramework>net472</TargetFramework>
         <RootNamespace>Cliparino</RootNamespace>
         <!--        <ImplicitUsings>enable</ImplicitUsings>-->
         <ImplicitUsings>disable</ImplicitUsings>
-        <LangVersion>latest</LangVersion>
+        <LangVersion>7.3</LangVersion>
         <!-- Ignore CS0114 errors -->
         <NoWarn>CS0114</NoWarn>
         <!-- <EnableDefaultCompileItems>false</EnableDefaultCompileItems>-->
     </PropertyGroup>
     <ItemGroup>
         <!-- Include all DLLs in a specific directory in the build output -->
-        <Reference Include="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.dll"/>
-        <Reference Include="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.Core.dll"/>
-        <Reference Include="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.Net.dll"/>
-        <Reference Include="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.Net.Http.dll"/>
-        <Reference Include="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\netstandard.dll"/>
-        <Reference Include="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.Windows.Forms.dll"/>
-        <Reference Include="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.Drawing.dll"/>
-        <Reference Include="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\Microsoft.VisualBasic.dll"/>
-        <Reference Include="Microsoft.CSharp"/>
+        <Reference Include="$(SystemRoot)\Microsoft.NET\Framework64\v4.0.30319\System.dll"/>
+        <Reference Include="$(SystemRoot)\Microsoft.NET\Framework64\v4.0.30319\System.Core.dll"/>
+        <Reference Include="$(SystemRoot)\Microsoft.NET\Framework64\v4.0.30319\System.Net.dll"/>
+        <Reference Include="$(SystemRoot)\Microsoft.NET\Framework64\v4.0.30319\System.Net.Http.dll"/>
+        <Reference Include="$(SystemRoot)\Microsoft.NET\Framework64\v4.0.30319\netstandard.dll"/>
+        <Reference Include="$(SystemRoot)\Microsoft.NET\Framework64\v4.0.30319\System.Windows.Forms.dll"/>
+        <Reference Include="$(SystemRoot)\Microsoft.NET\Framework64\v4.0.30319\System.Drawing.dll"/>
+        <Reference Include="$(SystemRoot)\Microsoft.NET\Framework64\v4.0.30319\Microsoft.VisualBasic.dll"/>
+        <Reference Include="$(SystemRoot)\Microsoft.NET\Framework64\v4.0.30319\Microsoft.CSharp.dll"/>
         <!-- List of dlls included with Streamer.bot -->
-        <Reference Include="S:\OneDrive\Documents\Miscellaneous\Streaming\Streamer.bot\References\Streamer.bot.Plugin.Interface.dll"/>
-        <Reference Include="S:\OneDrive\Documents\Miscellaneous\Streaming\Streamer.bot\References\Streamer.bot.Common.dll"/>
-        <Reference Include="S:\OneDrive\Documents\Miscellaneous\Streaming\Streamer.bot\References\Streamer.bot.Auth.dll"/>
-        <Reference Include="S:\OneDrive\Documents\Miscellaneous\Streaming\Streamer.bot\References\Streamer.bot.EmoteHandlers.dll"/>
-        <Reference Include="S:\OneDrive\Documents\Miscellaneous\Streaming\Streamer.bot\References\NAudio.dll"/>
-        <Reference Include="S:\OneDrive\Documents\Miscellaneous\Streaming\Streamer.bot\References\NAudio.Core.dll"/>
-        <Reference Include="S:\OneDrive\Documents\Miscellaneous\Streaming\Streamer.bot\References\Newtonsoft.Json.dll"/>
-        <Reference Include="S:\OneDrive\Documents\Miscellaneous\Streaming\Streamer.bot\References\Twitch.Common.dll"/>
-        <Reference Include="S:\OneDrive\Documents\Miscellaneous\Streaming\Streamer.bot\References\websocket-sharp.dll"/>
+        <Reference Include="$(AppData)\Streamer.bot\Streamer.bot.Plugin.Interface.dll"/>
+        <Reference Include="$(AppData)\Streamer.bot\Streamer.bot.Common.dll"/>
+        <Reference Include="$(AppData)\Streamer.bot\Streamer.bot.Auth.dll"/>
+        <Reference Include="$(AppData)\Streamer.bot\Streamer.bot.EmoteHandlers.dll"/>
+        <Reference Include="$(AppData)\Streamer.bot\NAudio.dll"/>
+        <Reference Include="$(AppData)\Streamer.bot\NAudio.Core.dll"/>
+        <Reference Include="$(AppData)\Streamer.bot\Newtonsoft.Json.dll"/>
+        <Reference Include="$(AppData)\Streamer.bot\Twitch.Common.dll"/>
+        <Reference Include="$(AppData)\Streamer.bot\websocket-sharp.dll"/>
         <!-- Example of a dll in the Streamer.bot dlls folder -->
         <!-- <Reference Include="D:\overlays\streamerbot\dlls\SharpOSC.dll" /> -->
     </ItemGroup>
