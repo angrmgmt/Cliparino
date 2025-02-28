@@ -22,6 +22,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -38,6 +39,8 @@ using Streamer.bot.Plugin.Interface;
 using Streamer.bot.Plugin.Interface.Enums;
 using Streamer.bot.Plugin.Interface.Model;
 using Twitch.Common.Models.Api;
+using static System.Environment;
+using static System.Environment.SpecialFolder;
 
 #endregion
 
@@ -51,6 +54,8 @@ public class CPHInline : CPHInlineBase {
     private const int DefaultWidth = 1920;
     private const int DefaultHeight = 1080;
     private const int AdditionalHtmlSetupDelaySeconds = 3;
+    private const string CliparinoSourceName = "Cliparino";
+    private const string PlayerSourceName = "Player";
     private const string LastClipUrlKey = "last_clip_url";
 
     private const string CSSText = "div {\n"
@@ -146,11 +151,13 @@ public class CPHInline : CPHInlineBase {
     private CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
     private ClipManager _clipManager;
     private HttpClient _httpClient;
+    private string _lastClipUrl;
     private Task _listeningTask;
     private bool _loggingEnabled;
     private HttpListener _server;
+
     private TwitchApiClient _twitchApiClient;
-    private string _lastClipUrl;
+    // Kerb advised me to type soup; I acquiesced. I'm sorry.
 
     #region Initialization & Core Execution
 
@@ -160,6 +167,8 @@ public class CPHInline : CPHInlineBase {
         _twitchApiClient =
             new TwitchApiClient(_httpClient, new OAuthInfo(CPH.TwitchClientId, CPH.TwitchOAuthToken), Log);
         _clipManager = new ClipManager(_twitchApiClient, Log, CPH);
+        PathBuddy.EnsureCliparinoFolderExists();
+        PathBuddy.SetLogger(Log);
     }
 
     // ReSharper disable once UnusedMember.Global
@@ -186,7 +195,7 @@ public class CPHInline : CPHInlineBase {
                 return false;
             }
 
-            EnsureCliparinoInCurrentSceneAsync(null, string.Empty).GetAwaiter().GetResult();
+            EnsureCliparinoInCurrentSceneAsync(null).GetAwaiter().GetResult();
 
             var input0 = GetArgument("input0", string.Empty);
             var width = GetArgument("width", DefaultWidth);
@@ -716,10 +725,10 @@ public class CPHInline : CPHInlineBase {
     ///     for handling Twitch clip data.
     /// </remarks>
     private class ClipManager {
-        private readonly TwitchApiClient _twitchApiClient;
-        private readonly LogDelegate _log;
-        private readonly IInlineInvokeProxy _cph;
         private readonly Dictionary<string, ClipData> _clipCache = new Dictionary<string, ClipData>();
+        private readonly IInlineInvokeProxy _cph;
+        private readonly LogDelegate _log;
+        private readonly TwitchApiClient _twitchApiClient;
 
         /// <summary>
         ///     Provides methods for managing and interacting with Twitch clips.
@@ -886,6 +895,19 @@ public class CPHInline : CPHInlineBase {
     /// </remarks>
     private class ClipSettings {
         /// <summary>
+        ///     Represents settings to configure the behavior for selecting and fetching Twitch clips.
+        /// </summary>
+        /// <remarks>
+        ///     This class encapsulates configurations such as whether to only include featured clips, the
+        ///     maximum duration of clips in seconds, and the maximum age of clips in days.
+        /// </remarks>
+        public ClipSettings(bool featuredOnly, int maxClipSeconds, int clipAgeDays) {
+            FeaturedOnly = featuredOnly;
+            MaxClipSeconds = maxClipSeconds;
+            ClipAgeDays = clipAgeDays;
+        }
+
+        /// <summary>
         ///     Gets a value indicating whether only featured clips should be considered.
         /// </summary>
         /// <value>
@@ -921,19 +943,6 @@ public class CPHInline : CPHInlineBase {
         ///     non-negative integer to avoid unexpected behavior.
         /// </remarks>
         public int ClipAgeDays { get; }
-
-        /// <summary>
-        ///     Represents settings to configure the behavior for selecting and fetching Twitch clips.
-        /// </summary>
-        /// <remarks>
-        ///     This class encapsulates configurations such as whether to only include featured clips, the
-        ///     maximum duration of clips in seconds, and the maximum age of clips in days.
-        /// </remarks>
-        public ClipSettings(bool featuredOnly, int maxClipSeconds, int clipAgeDays) {
-            FeaturedOnly = featuredOnly;
-            MaxClipSeconds = maxClipSeconds;
-            ClipAgeDays = clipAgeDays;
-        }
 
         /// <summary>
         ///     Deconstructs the <see cref="ClipSettings" /> into its constituent components.
@@ -1201,46 +1210,30 @@ public class CPHInline : CPHInlineBase {
 
     /// <summary>
     ///     Ensures that the Cliparino source is properly configured and displayed within the specified
-    ///     scene in the streaming software's active setup. Additionally, processes the clip URL to fetch
-    ///     game metadata associated with the clip.
+    ///     scene in the streaming software's active setup.
     /// </summary>
     /// <param name="currentScene">
     ///     The name of the scene to ensure the Cliparino source exists in. If null or empty, the method
     ///     will retrieve and use the current active scene.
     /// </param>
-    /// <param name="clipUrl">
-    ///     The URL of the Twitch clip to be displayed in the Cliparino source. Used to fetch associated
-    ///     game metadata.
-    /// </param>
-    /// <returns>
-    ///     A <see cref="string" /> representing the name of the game associated with the provided
-    ///     <paramref name="clipUrl" />, or "Unknown Game" if the game name cannot be determined.
-    /// </returns>
     /// <exception cref="ArgumentNullException">
     ///     Thrown when <paramref name="currentScene" /> is null or empty after processing.
     /// </exception>
     /// <exception cref="Exception">
-    ///     Thrown if any errors occur while ensuring the Cliparino source or fetching the game name from
-    ///     the clip URL.
+    ///     Thrown if any errors occur while ensuring the Cliparino source is present.
     /// </exception>
     /// <remarks>
     ///     This method primarily handles configuration for the Cliparino Twitch clip source in OBS or
     ///     other compatible streaming software. It ensures the configured source is present in the
-    ///     specified scene and attempts to extract the game title from the provided clip URL for
-    ///     descriptive purposes.
+    ///     specified scene.
     /// </remarks>
-    private async Task<string> EnsureCliparinoInCurrentSceneAsync(string currentScene, string clipUrl) {
+    private async Task EnsureCliparinoInCurrentSceneAsync(string currentScene) {
         try {
             currentScene = EnsureSceneIsNotNullOrEmpty(currentScene);
 
             await EnsureCliparinoInSceneAsync(currentScene);
-            var gameName = await GetGameNameFromClipUrlAsync(clipUrl);
-
-            return gameName;
         } catch (Exception ex) {
             Log(LogLevel.Error, $"Error in {nameof(EnsureCliparinoInCurrentSceneAsync)}: {ex.Message}");
-
-            return "Unknown Game";
         }
     }
 
@@ -1290,7 +1283,11 @@ public class CPHInline : CPHInlineBase {
     private void EnsureClipSourceHidden() {
         var currentScene = CPH.ObsGetCurrentScene();
         const string clipSourceName = "Cliparino";
-        EnsureSourceExistsAndIsVisible(currentScene, clipSourceName, false);
+
+        Log(LogLevel.Info,
+            EnsureSourceExistsAndIsVisible(currentScene, clipSourceName, false)
+                ? $"{nameof(EnsureClipSourceHidden)} reports {clipSourceName} is visible."
+                : $"{nameof(EnsureClipSourceHidden)} reports {clipSourceName} is hidden.");
     }
 
     /// <summary>
@@ -1338,49 +1335,6 @@ public class CPHInline : CPHInlineBase {
     }
 
     /// <summary>
-    ///     Asynchronously retrieves the name of the game associated with the provided Twitch clip URL.
-    /// </summary>
-    /// <param name="clipUrl">
-    ///     The URL of the Twitch clip for which the associated game's name is to be retrieved. The
-    ///     parameter must not be null, empty, or invalid as it represents the clip's unique identifier and
-    ///     source.
-    /// </param>
-    /// <returns>
-    ///     A <c>string</c> representing the name of the game associated with the provided clip URL. Returns "Unknown
-    ///     Game" if the game's name cannot be determined or if an error occurs.
-    /// </returns>
-    /// <exception cref="ArgumentNullException">
-    ///     Thrown when the <paramref name="clipUrl" /> is null or empty.
-    /// </exception>
-    /// <exception cref="Exception">
-    ///     An exception encapsulating any error that occurs during the process of fetching clip data or
-    ///     game information.
-    /// </exception>
-    /// <remarks>
-    ///     This method uses the <see cref="ClipManager" /> to fetch data about the clip, including its
-    ///     associated game ID, and then uses <see cref="TwitchApiClient" /> to retrieve the name of the
-    ///     game. If any errors occur or if no valid data is found, "Unknown Game" is returned to
-    ///     gracefully handle potential data or network issues.
-    /// </remarks>
-    /// <seealso cref="ClipManager" />
-    /// <seealso cref="TwitchApiClient" />
-    private async Task<string> GetGameNameFromClipUrlAsync(string clipUrl) {
-        try {
-            var clipData = await _clipManager.GetClipData(clipUrl);
-
-            if (clipData == null) return "Unknown Game";
-
-            var gameData = await _twitchApiClient.FetchGameById(clipData.GameId);
-
-            return gameData?.Name ?? "Unknown Game";
-        } catch (Exception ex) {
-            Log(LogLevel.Error, $"Error fetching game name: {ex.Message}");
-
-            return "Unknown Game";
-        }
-    }
-
-    /// <summary>
     ///     Ensures that the "Cliparino" source is present in the specified scene. If the source does not
     ///     exist in the scene, it will be added.
     /// </summary>
@@ -1404,39 +1358,53 @@ public class CPHInline : CPHInlineBase {
     /// <seealso cref="AddCliparinoSourceToSceneAsync" />
     private async Task EnsureCliparinoInSceneAsync(string currentScene) {
         try {
-            const string cliparinoSourceName = "Cliparino";
-            if (!IsCliparinoSourceInScene(currentScene, cliparinoSourceName))
-                await AddCliparinoSourceToSceneAsync(currentScene, cliparinoSourceName);
-            else
-                Log(LogLevel.Debug, $"Cliparino source already exists in scene '{currentScene}'.");
+            if (!IsCliparinoSourceInScene(currentScene, CliparinoSourceName))
+                await AddCliparinoSourceToSceneAsync(currentScene, CliparinoSourceName);
         } catch (Exception ex) {
             Log(LogLevel.Error, $"Error in {nameof(EnsureCliparinoInSceneAsync)}: {ex.Message}");
         }
     }
 
     /// <summary>
-    ///     Determines whether the specified source is present and visible in the given OBS scene.
+    ///     Determines whether the specified source is present in the given OBS scene.
     /// </summary>
     /// <param name="scene">
     ///     The name of the OBS scene to check for the source presence.
     /// </param>
     /// <param name="sourceName">
-    ///     The name of the source to check for visibility within the specified scene.
+    ///     The name of the source to check for presence within the specified scene.
     /// </param>
     /// <returns>
-    ///     A boolean value indicating whether the specified source is visible in the provided scene.
-    ///     Returns <c>true</c> if the source is visible; otherwise, <c>false</c>.
+    ///     A boolean value indicating whether the specified source is present in the provided scene.
+    ///     Returns <c>true</c> if the source is present; otherwise, <c>false</c>.
     /// </returns>
     /// <exception cref="ArgumentNullException">
     ///     Thrown if <paramref name="scene" /> or <paramref name="sourceName" /> is <c>null</c> or empty.
     /// </exception>
-    /// <remarks>
-    ///     This method uses the OBS integration provided by Streamer.bot to verify the visibility state of
-    ///     a source in a scene. Ensure that the OBS WebSocket plugin is properly configured for this
-    ///     functionality.
-    /// </remarks>
     private bool IsCliparinoSourceInScene(string scene, string sourceName) {
-        return CPH.ObsIsSourceVisible(scene, sourceName);
+        if (string.IsNullOrWhiteSpace(scene))
+            throw new ArgumentNullException(nameof(scene), "Scene name cannot be null or empty.");
+
+        if (string.IsNullOrWhiteSpace(sourceName))
+            throw new ArgumentNullException(nameof(sourceName), "Source name cannot be null or empty.");
+
+        try {
+            var sourceExistsInScene = SourceExistsInScene(scene, sourceName);
+
+            if (sourceExistsInScene) {
+                Log(LogLevel.Info, $"{nameof(IsCliparinoSourceInScene)} reports source is in scene.");
+
+                return true;
+            }
+
+            Log(LogLevel.Warn, $"Cliparino source is not in scene '{scene}'.");
+
+            return false;
+        } catch (Exception ex) {
+            Log(LogLevel.Error, $"{CreateErrorPreamble()} {ex.Message}.");
+
+            return false;
+        }
     }
 
     /// <summary>
@@ -1466,6 +1434,7 @@ public class CPHInline : CPHInlineBase {
     /// </remarks>
     private async Task AddCliparinoSourceToSceneAsync(string scene, string sourceName) {
         await Task.Run(() => AddSceneSource(scene, sourceName));
+
         Log(LogLevel.Info, $"Cliparino source added to scene '{scene}'.");
     }
 
@@ -1485,38 +1454,13 @@ public class CPHInline : CPHInlineBase {
     ///     Thrown if required scene or source configurations cannot be prepared or validated.
     /// </exception>
     private async Task PrepareSceneForClipHostingAsync() {
-        const string cliparinoSourceName = "Cliparino";
-        const string playerSourceName = "Player";
+        Log(LogLevel.Info, $"Preparing scene '{CliparinoSourceName}' for clip hosting.");
 
-        Log(LogLevel.Info, $"Preparing scene '{cliparinoSourceName}' for clip hosting.");
-        EnsureCliparinoSceneExists(cliparinoSourceName);
-        EnsurePlayerSourceIsVisible(cliparinoSourceName, playerSourceName);
+        if (!SceneExists(CliparinoSourceName)) CreateScene(CliparinoSourceName);
+
+        EnsurePlayerSourceIsVisible(CliparinoSourceName, PlayerSourceName);
 
         await ConfigureAudioForPlayerSourceAsync();
-    }
-
-    /// <summary>
-    ///     Ensures that a scene with the specified name exists in the OBS configuration. If the scene does
-    ///     not exist, the method creates it and adds it as a source to the currently active OBS scene.
-    /// </summary>
-    /// <param name="sceneName">
-    ///     The name of the scene to verify or create.
-    /// </param>
-    /// <remarks>
-    ///     This method is used to prepare the environment for hosting Twitch clips. If the specified scene
-    ///     does not already exist, it is created and logged. The created scene will then be added to the
-    ///     currently active scene as a source to make it available for integration.
-    /// </remarks>
-    /// <exception cref="InvalidOperationException">
-    ///     Thrown when the scene cannot be created or added as a source due to an unspecified failure in
-    ///     OBS operations.
-    /// </exception>
-    private void EnsureCliparinoSceneExists(string sceneName) {
-        if (SceneExists(sceneName)) return;
-
-        CreateScene(sceneName);
-        Log(LogLevel.Info, $"Scene '{sceneName}' did not exist and was successfully created.");
-        AddSceneSource(CPH.ObsGetCurrentScene(), sceneName);
     }
 
     /// <summary>
@@ -1538,8 +1482,13 @@ public class CPHInline : CPHInlineBase {
     ///     <c>null</c> or empty.
     /// </exception>
     private void EnsurePlayerSourceIsVisible(string sceneName, string sourceName) {
-        if (!EnsureSourceExistsAndIsVisible(sceneName, sourceName))
-            AddBrowserSource(sceneName, sourceName, "http://localhost:8080/index.htm");
+        if (CPH.ObsIsSourceVisible(sceneName, sourceName)) return;
+
+        Log(LogLevel.Info, $"Setting source '{sourceName}' to visible in scene '{sceneName}'.");
+        CPH.ObsSetSourceVisibility(sceneName, sourceName, true);
+
+        Log(LogLevel.Warn, $"The source '{sourceName}' does not exist in scene '{sceneName}'. Attempting to add.");
+        AddBrowserSource(sceneName, sourceName, "http://localhost:8080/index.htm");
     }
 
     /// <summary>
@@ -1631,6 +1580,8 @@ public class CPHInline : CPHInlineBase {
         }
 
         if (!setVisible) return true;
+
+        if (CPH.ObsIsSourceVisible(sceneName, sourceName)) return true;
 
         Log(LogLevel.Info, $"Setting source '{sourceName}' to visible in scene '{sceneName}'.");
         CPH.ObsSetSourceVisibility(sceneName, sourceName, true);
@@ -2010,12 +1961,12 @@ public class CPHInline : CPHInlineBase {
     /// </exception>
     /// <seealso cref="IInlineInvokeProxy.ObsSendRaw(string, string, int)" />
     private void AddSceneSource(string targetScene, string sourceName) {
-        var payload = new {
-            requestType = "CreateSceneItem",
-            requestData = new { sceneName = targetScene, sourceName, sceneItemEnabled = true }
+        var payload = new Payload {
+            RequestType = "CreateSceneItem",
+            RequestData = new { sceneName = targetScene, sourceName, sceneItemEnabled = true }
         };
 
-        CPH.ObsSendRaw(payload.requestType, JsonConvert.SerializeObject(payload.requestData));
+        CPH.ObsSendRaw(payload.RequestType, JsonConvert.SerializeObject(payload.RequestData));
     }
 
     /// <summary>
@@ -2073,11 +2024,16 @@ public class CPHInline : CPHInlineBase {
         try {
             var sceneExists = false;
             var response = JsonConvert.DeserializeObject<dynamic>(CPH.ObsSendRaw("GetSceneList", "{}"));
+
+            Log(LogLevel.Debug, $"The result of the scene list request was {JsonConvert.SerializeObject(response)}");
+
             var scenes = response?.scenes;
+
+            Log(LogLevel.Debug, $"Scenes pulled from OBS: {JsonConvert.SerializeObject(scenes)}");
 
             if (scenes != null)
                 foreach (var scene in scenes) {
-                    if ((string)scene.name != sceneName) continue;
+                    if ((string)scene.sceneName != sceneName) continue;
 
                     sceneExists = true;
 
@@ -2085,6 +2041,8 @@ public class CPHInline : CPHInlineBase {
                 }
 
             if (!sceneExists) Log(LogLevel.Warn, $"Scene '{sceneName}' does not exist.");
+
+            Log(LogLevel.Debug, $"Scene {sceneName} exists: {sceneExists}");
 
             return sceneExists;
         } catch (Exception ex) {
@@ -2111,9 +2069,9 @@ public class CPHInline : CPHInlineBase {
     /// </exception>
     private void CreateScene(string sceneName) {
         try {
-            var payload = new { requestType = "CreateScene", requestData = new { sceneName } };
+            var payload = new Payload { RequestType = "CreateScene", RequestData = new { sceneName } };
 
-            CPH.ObsSendRaw(payload.requestType, JsonConvert.SerializeObject(payload.requestData));
+            CPH.ObsSendRaw(payload.RequestType, JsonConvert.SerializeObject(payload.RequestData));
             Log(LogLevel.Info, $"Scene '{sceneName}' created successfully.");
         } catch (Exception ex) {
             Log(LogLevel.Error, $"Error in CreateScene: {ex.Message}");
@@ -2144,12 +2102,13 @@ public class CPHInline : CPHInlineBase {
     ///     browser source.
     /// </exception>
     private void AddBrowserSource(string sceneName, string sourceName, string url = "about:blank") {
+        //TODO: Consider a new class that wraps Cliparino scene and keeps track of the state
         try {
-            var payload = new {
-                requestType = "CreateSource", requestData = new { sceneName, sourceName, url, type = "browser_source" }
+            var payload = new Payload {
+                RequestType = "CreateSource", RequestData = new { sceneName, sourceName, url, type = "browser_source" }
             };
 
-            var response = CPH.ObsSendRaw(payload.requestType, JsonConvert.SerializeObject(payload.requestData));
+            var response = CPH.ObsSendRaw(payload.RequestType, JsonConvert.SerializeObject(payload.RequestData));
             Log(LogLevel.Info,
                 $"Browser source '{sourceName}' added to scene '{sceneName}' with URL '{url}'.\nResponse: {response}");
         } catch (Exception ex) {
@@ -2196,10 +2155,10 @@ public class CPHInline : CPHInlineBase {
     ///     specified HTTP client, OAuth credentials, and a logging mechanism.
     /// </remarks>
     private class TwitchApiClient {
+        private readonly string _authToken;
+        private readonly string _clientId;
         private readonly HttpClient _httpClient;
         private readonly LogDelegate _log;
-        private readonly string _clientId;
-        private readonly string _authToken;
 
         /// <summary>
         ///     Represents a client for interacting with the Twitch API. Provides methods for fetching Twitch
@@ -2685,16 +2644,20 @@ public class CPHInline : CPHInlineBase {
     private async Task<bool> ConfigureAndServe() {
         try {
             await CleanupServer();
+
             ValidatePortAvailability(8080);
 
             if (!await ExecuteWithSemaphore(ServerSemaphore, nameof(ServerSemaphore), SetupServerAndTokens))
                 return false;
         } catch (Exception ex) {
             Log(LogLevel.Error, $"Configuration failed: {ex.Message}");
+
             await CleanupServer();
 
             return false;
         }
+
+        Log(LogLevel.Debug, $"{nameof(ConfigureAndServe)} executed successfully: Server setup complete.");
 
         return true;
     }
@@ -2985,10 +2948,18 @@ public class CPHInline : CPHInlineBase {
                                                   string clipTitle,
                                                   string curatorName,
                                                   ClipData clipData) {
-        Log(LogLevel.Debug,
-            $"{nameof(CreateAndHostClipPageAsync)} called with parameters: {JsonConvert.SerializeObject(new { clipUrl, streamerName, clipTitle, curatorName, clipData })}");
-
         try {
+            var clipInfo = new {
+                clipUrl,
+                streamerName,
+                clipTitle,
+                curatorName,
+                clipData
+            };
+
+            Log(LogLevel.Debug,
+                $"{nameof(CreateAndHostClipPageAsync)} called with parameters: {JsonConvert.SerializeObject(clipInfo)}");
+
             if (string.IsNullOrWhiteSpace(clipUrl)) {
                 Log(LogLevel.Error, "clipUrl cannot be null or empty. Ensure it is passed correctly.");
 
@@ -2999,8 +2970,8 @@ public class CPHInline : CPHInlineBase {
             var gameName = await FetchGameNameAsync(clipData.GameId);
 
             _htmlInMemory = GenerateHtmlContent(clipId, streamerName, gameName, clipTitle, curatorName);
-
-            Log(LogLevel.Debug, $"Generated HTML content stored in memory: {_htmlInMemory}");
+            Log(LogLevel.Debug, "Generated HTML content stored in memory.");
+            LogHtmlContent(_htmlInMemory);
 
             var isConfigured = await ConfigureAndServe();
 
@@ -3012,8 +2983,38 @@ public class CPHInline : CPHInlineBase {
             Log(LogLevel.Error, $"Error occurred in {nameof(CreateAndHostClipPageAsync)}: {ex.Message}");
             Log(LogLevel.Debug, ex.StackTrace);
         } finally {
+            await CleanupServer();
             Log(LogLevel.Debug, $"{nameof(CreateAndHostClipPageAsync)} execution finished.");
         }
+    }
+
+    private static class PathBuddy {
+        private static readonly string AppDataFolder = Path.Combine(GetFolderPath(ApplicationData), "Cliparino");
+        private static LogDelegate _log;
+
+        public static string GetCliparinoFolderPath() {
+            return AppDataFolder;
+        }
+
+        public static void SetLogger(LogDelegate log) {
+            _log = log;
+        }
+
+        public static void EnsureCliparinoFolderExists() {
+            if (!Directory.Exists(AppDataFolder)) {
+                Directory.CreateDirectory(AppDataFolder);
+                _log(LogLevel.Debug, $"Created Cliparino folder at {AppDataFolder}.");
+            } else {
+                _log(LogLevel.Info, $"Cliparino folder exists at {AppDataFolder}.");
+            }
+        }
+    }
+
+    private void LogHtmlContent(string htmlContent) {
+        var cliparinoPagePath = Path.Combine(PathBuddy.GetCliparinoFolderPath(), "cliparino.html");
+
+        File.WriteAllText(cliparinoPagePath, htmlContent);
+        Log(LogLevel.Info, $"Generated HTML for clip playback, written to {cliparinoPagePath}");
     }
 
     /// <summary>
@@ -3117,8 +3118,11 @@ public class CPHInline : CPHInlineBase {
         using (new ScopedSemaphore(ServerSemaphore, Log)) {
             try {
                 await CancelAllOperationsAsync();
+
                 var serverInstance = TakeServerInstance(server);
+
                 await CleanupListeningTaskAsync();
+
                 StopAndDisposeServer(serverInstance);
             } catch (Exception ex) {
                 Log(LogLevel.Error, $"Unexpected error during CleanupServer: {ex.Message}");
@@ -3279,8 +3283,8 @@ public class CPHInline : CPHInlineBase {
     ///     avoiding semaphore leakage and handling exceptions during semaphore release.
     /// </summary>
     private class ScopedSemaphore : IDisposable {
-        private readonly SemaphoreSlim _semaphore;
         private readonly LogDelegate _log;
+        private readonly SemaphoreSlim _semaphore;
         private bool _hasLock;
 
         /// <summary>
@@ -3298,6 +3302,29 @@ public class CPHInline : CPHInlineBase {
             _log = log ?? throw new ArgumentNullException(nameof(log));
             _semaphore.Wait();
             _hasLock = true;
+        }
+
+        /// <summary>
+        ///     Releases all resources held by the <see cref="ScopedSemaphore" />. Ensures the semaphore is
+        ///     properly released if it was acquired successfully.
+        /// </summary>
+        /// <remarks>
+        ///     This method handles various edge cases that could occur during the release of the semaphore,
+        ///     such as semaphore being disposed or already at maximum count. It logs any issues encountered
+        ///     during the release process using the provided log delegate.
+        /// </remarks>
+        public void Dispose() {
+            if (!_hasLock) return;
+
+            try {
+                _semaphore?.Release();
+            } catch (ObjectDisposedException) {
+                _log(LogLevel.Warn, "Semaphore has been disposed.");
+            } catch (SemaphoreFullException) {
+                _log(LogLevel.Warn, "Semaphore full exception occurred during release.");
+            } catch (Exception ex) {
+                _log(LogLevel.Error, $"Unexpected exception while releasing semaphore: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -3331,29 +3358,6 @@ public class CPHInline : CPHInlineBase {
             scopedSemaphore._hasLock = true;
 
             return scopedSemaphore;
-        }
-
-        /// <summary>
-        ///     Releases all resources held by the <see cref="ScopedSemaphore" />. Ensures the semaphore is
-        ///     properly released if it was acquired successfully.
-        /// </summary>
-        /// <remarks>
-        ///     This method handles various edge cases that could occur during the release of the semaphore,
-        ///     such as semaphore being disposed or already at maximum count. It logs any issues encountered
-        ///     during the release process using the provided log delegate.
-        /// </remarks>
-        public void Dispose() {
-            if (!_hasLock) return;
-
-            try {
-                _semaphore?.Release();
-            } catch (ObjectDisposedException) {
-                _log(LogLevel.Warn, "Semaphore has been disposed.");
-            } catch (SemaphoreFullException) {
-                _log(LogLevel.Warn, "Semaphore full exception occurred during release.");
-            } catch (Exception ex) {
-                _log(LogLevel.Error, $"Unexpected exception while releasing semaphore: {ex.Message}");
-            }
         }
     }
 
