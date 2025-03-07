@@ -46,7 +46,7 @@ public class TwitchApiManager {
 
     public void SendShoutout(string username, string message) {
         if (string.IsNullOrWhiteSpace(username)) {
-            _logger.Log(LogLevel.Warn, "No username provided for shoutout.");
+            _logger.Log(LogLevel.Error, "No username provided for shoutout.");
 
             return;
         }
@@ -56,7 +56,7 @@ public class TwitchApiManager {
         var user = _cph.TwitchGetExtendedUserInfoByLogin(username);
 
         if (user == null) {
-            _logger.Log(LogLevel.Warn, $"No user found with name '{username}'.");
+            _logger.Log(LogLevel.Error, $"No user found with name '{username}'.");
 
             return;
         }
@@ -68,7 +68,15 @@ public class TwitchApiManager {
     }
 
     private static string FormatShoutoutMessage(TwitchUserInfoEx user, string message) {
-        return message.Replace("[[userName]]", $"{user.UserName}").Replace("[[userGameName]]", $"{user.Game}");
+        return message.Replace("[[userName]]", user.UserName).Replace("[[userGameName]]", user.Game);
+    }
+
+    public async Task<ClipData> FetchClipById(string clipId) {
+        return await FetchDataAsync<ClipData>($"clips?id={clipId}");
+    }
+
+    public async Task<GameData> FetchGameById(string gameId) {
+        return await FetchDataAsync<GameData>($"games?id={gameId}");
     }
 
     private async Task<T> FetchDataAsync<T>(string endpoint) {
@@ -84,33 +92,30 @@ public class TwitchApiManager {
         _logger.Log(LogLevel.Debug, $"Preparing to make GET request to endpoint: {completeUrl}");
 
         try {
-            var content = await SendHttpRequestAsync(endpoint, completeUrl);
+            var content = await SendHttpRequestAsync(endpoint);
 
             if (string.IsNullOrWhiteSpace(content)) return default;
 
             _logger.Log(LogLevel.Debug, $"Response content: {content}");
             var apiResponse = JsonConvert.DeserializeObject<TwitchApiResponse<T>>(content);
 
-            // Return the first item in the data array, if any.
             if (apiResponse?.Data != null && apiResponse.Data.Length > 0) {
-                _logger.Log(LogLevel.Info, "Successfully retrieved and deserialized data from the Twitch API.");
+                _logger.Log(LogLevel.Info, "Successfully retrieved and deserialized data from Twitch API.");
 
                 return apiResponse.Data[0];
             }
 
-            _logger.Log(LogLevel.Warn, $"No data returned from the Twitch API endpoint: {completeUrl}");
+            _logger.Log(LogLevel.Error, $"No data returned from Twitch API for endpoint: {endpoint}");
 
             return default;
         } catch (JsonException ex) {
-            _logger.Log(LogLevel.Error, $"JSON deserialization error for response from {completeUrl}: {ex.Message}");
+            _logger.Log(LogLevel.Error, $"JSON deserialization error for response from {endpoint}.", ex);
 
             return default;
         } catch (Exception ex) {
-            _logger.Log(LogLevel.Error, $"Unexpected error in {nameof(FetchDataAsync)}: {ex.Message}");
+            _logger.Log(LogLevel.Error, $"Unexpected error in FetchDataAsync for endpoint: {endpoint}", ex);
 
             return default;
-        } finally {
-            _logger.Log(LogLevel.Debug, $"{nameof(FetchDataAsync)} execution complete for endpoint.");
         }
     }
 
@@ -122,7 +127,7 @@ public class TwitchApiManager {
         client.DefaultRequestHeaders.Add("Authorization", $"Bearer {_oauthInfo.TwitchOAuthToken}");
     }
 
-    private async Task<string> SendHttpRequestAsync(string endpoint, string completeUrl) {
+    private async Task<string> SendHttpRequestAsync(string endpoint) {
         try {
             ConfigureHttpRequestHeaders();
             _logger.Log(LogLevel.Debug, "HTTP headers set successfully. Initiating request...");
@@ -134,23 +139,14 @@ public class TwitchApiManager {
             if (response.IsSuccessStatusCode) return await response.Content.ReadAsStringAsync();
 
             _logger.Log(LogLevel.Error,
-                        $"Request to Twitch API failed: {response.ReasonPhrase} "
-                        + $"(Status Code: {(int)response.StatusCode}, URL: {completeUrl})");
+                        $"Request to Twitch API failed: {response.ReasonPhrase} (Status Code: {(int)response.StatusCode}, URL: {endpoint})");
 
             return null;
         } catch (HttpRequestException ex) {
-            _logger.Log(LogLevel.Error, $"HTTP request error while calling {completeUrl}: {ex.Message}");
+            _logger.Log(LogLevel.Error, $"HTTP request error while calling {endpoint}.", ex);
 
             return null;
         }
-    }
-
-    public async Task<ClipData> FetchClipById(string clipId) {
-        return await FetchDataAsync<ClipData>($"clips?id={clipId}");
-    }
-
-    public async Task<GameData> FetchGameById(string gameId) {
-        return await FetchDataAsync<GameData>($"games?id={gameId}");
     }
 
     private class OAuthInfo {

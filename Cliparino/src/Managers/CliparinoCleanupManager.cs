@@ -44,10 +44,10 @@ public class CliparinoCleanupManager {
         await _semaphore.WaitAsync();
 
         try {
-            _logger.Log(LogLevel.Info, "CliparinoCleanupManager: Cleaning up resources.");
+            _logger.Log(LogLevel.Info, "Cleaning up resources.");
             _cph.SetGlobalVar("last_clip_url", null);
         } catch (Exception ex) {
-            _logger.Log(LogLevel.Error, "CliparinoCleanupManager: Error during cleanup.", ex);
+            _logger.Log(LogLevel.Error, "Error during Cliparino cleanup.", ex);
         } finally {
             _semaphore.Release();
         }
@@ -56,9 +56,12 @@ public class CliparinoCleanupManager {
     public void Dispose() {
         if (_disposed) return;
 
-        _disposed = true;
-
-        _semaphore.Dispose();
-        _logger.Log(LogLevel.Info, "CliparinoCleanupManager: Disposed resources.");
+        try {
+            _disposed = true;
+            _semaphore.Dispose();
+            _logger.Log(LogLevel.Info, "CliparinoCleanupManager disposed.");
+        } catch (Exception ex) {
+            _logger.Log(LogLevel.Error, "Error disposing CliparinoCleanupManager.", ex);
+        }
     }
 }

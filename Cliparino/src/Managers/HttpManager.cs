@@ -146,32 +146,33 @@ public class HttpManager {
     }
 
     public void StartServer() {
-        if (_listener != null) return;
+        try {
+            if (_listener != null) return;
 
-        _listener = new HttpListener();
-        _listener.Prefixes.Add(ServerUrl);
-        _listener.Start();
-        _listener.BeginGetContext(HandleRequest, null);
+            _listener = new HttpListener();
+            _listener.Prefixes.Add(ServerUrl);
+            _listener.Start();
+            _listener.BeginGetContext(HandleRequest, null);
 
-        _logger.Log(LogLevel.Info, $"HttpManager: Server started at {ServerUrl}");
+            _logger.Log(LogLevel.Info, $"HTTP server started at {ServerUrl}");
+        } catch (Exception ex) {
+            _logger.Log(LogLevel.Error, "Failed to start HTTP server.", ex);
+        }
     }
 
     public void StopHosting() {
         _currentClipEmbedUrl = null;
-        _logger.Log(LogLevel.Info, "HttpManager: Stopping hosting.");
+        _logger.Log(LogLevel.Info, "Stopped hosting clip.");
     }
 
     public void HostClip(ClipData clipData) {
-        _clipData = clipData;
-
-        if (clipData == null) {
-            _logger.Log(LogLevel.Warn, "HttpManager: Attempted to host a null clip.");
-
-            return;
+        try {
+            _clipData = clipData ?? throw new ArgumentNullException(nameof(clipData));
+            _currentClipEmbedUrl = $"https://clips.twitch.tv/embed?clip={clipData.Id}&parent=localhost";
+            _logger.Log(LogLevel.Info, $"Hosting clip {clipData.Id}");
+        } catch (Exception ex) {
+            _logger.Log(LogLevel.Error, "Error while hosting clip.", ex);
         }
-
-        _currentClipEmbedUrl = $"https://clips.twitch.tv/embed?clip={clipData.Id}&parent=localhost";
-        _logger.Log(LogLevel.Info, $"HttpManager: Hosting clip {clipData.Id}");
     }
 
     private void HandleRequest(IAsyncResult result) {
@@ -183,8 +184,7 @@ public class HttpManager {
 
         try {
             var requestPath = context.Request.Url.AbsolutePath;
-
-            LogRequest(requestPath);
+            _logger.Log(LogLevel.Debug, $"Received HTTP request: {requestPath}");
 
             switch (requestPath) {
                 case "/index.css": Task.Run(() => ServeCSS(context)); break;
@@ -200,11 +200,7 @@ public class HttpManager {
         }
     }
 
-    private void LogRequest(string requestPath) {
-        _logger.Log(LogLevel.Debug, $"Received HTTP request for path: {requestPath}");
-    }
-
-    private async Task ServeCSS(HttpListenerContext context) {
+    private static async Task ServeCSS(HttpListenerContext context) {
         context.Response.ContentType = "text/css";
 
         var buffer = Encoding.UTF8.GetBytes(CSSText);
@@ -215,15 +211,20 @@ public class HttpManager {
     }
 
     private async Task ServeHTML(HttpListenerContext context) {
-        string responseString;
+        try {
+            string responseString;
 
-        (responseString, context) = await SetUpSite(context);
+            (responseString, context) = await SetUpSite(context);
 
-        var buffer = Encoding.UTF8.GetBytes(responseString);
+            var buffer = Encoding.UTF8.GetBytes(responseString);
 
-        await context.Response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
-
-        context.Response.Close();
+            context.Response.ContentLength64 = buffer.Length;
+            await context.Response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
+            context.Response.OutputStream.Close();
+            context.Response.Close();
+        } catch (Exception ex) {
+            HandleError(context, 500, "Error while serving HTML.", ex);
+        }
     }
 
     private async Task<(string responseString, HttpListenerContext context)> SetUpSite(HttpListenerContext context) {
@@ -271,7 +272,6 @@ public class HttpManager {
                              Exception exception = null) {
         try {
             _logger.Log(LogLevel.Error, errorMessage, exception);
-
             context.Response.StatusCode = statusCode;
             context.Response.Close();
         } catch (Exception ex) {

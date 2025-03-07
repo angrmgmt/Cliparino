@@ -149,7 +149,7 @@ public class ClipManager {
 
     public async Task<ClipData> GetClipDataAsync(string clipUrl) {
         if (string.IsNullOrWhiteSpace(clipUrl)) {
-            _logger.Log(LogLevel.Warn, "Invalid clip URL provided.");
+            _logger.Log(LogLevel.Error, "Invalid clip URL provided.");
 
             return null;
         }
@@ -158,7 +158,7 @@ public class ClipManager {
 
         if (!string.IsNullOrWhiteSpace(clipId)) return await FetchClipDataAsync(clipId);
 
-        _logger.Log(LogLevel.Warn, "Could not extract clip ID from URL.");
+        _logger.Log(LogLevel.Error, "Could not extract clip ID from URL.");
 
         return null;
     }
@@ -174,7 +174,7 @@ public class ClipManager {
             var clipData = await _twitchApiManager.FetchClipById(clipId);
 
             if (clipData == null) {
-                _logger.Log(LogLevel.Warn, $"No clip data found for ID {clipId}.");
+                _logger.Log(LogLevel.Error, $"No clip data found for ID {clipId}.");
 
                 return null;
             }
