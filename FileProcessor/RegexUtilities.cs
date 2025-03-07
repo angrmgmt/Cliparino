@@ -13,6 +13,14 @@ internal static class RegexUtilities {
         return new Regex(@"^\s*// ReSharper\s+\S+.*$", RegexOptions.Multiline);
     }
 
+    private static Regex BlockCommentRegex() {
+        return new Regex(@"/\*.*?\*/", RegexOptions.Singleline); // For license/header block
+    }
+
+    private static Regex RegionLineRegex() {
+        return new Regex(@"^\s*#(region|endregion).*$", RegexOptions.Multiline);
+    }
+
     private static Regex SuppressMessageAttributesRegex() {
         return new Regex(@"^\s*\[SuppressMessage\(.*?\)\]\s*$", RegexOptions.Multiline);
     }
@@ -27,6 +35,14 @@ internal static class RegexUtilities {
 
     public static string RemoveReSharperComments(string input) {
         return ReSharperCommentsRegex().Replace(input, string.Empty);
+    }
+
+    public static string RemoveBlockComments(string content) {
+        return BlockCommentRegex().Replace(content, string.Empty);
+    }
+
+    public static string RemoveRegionBlocks(string content) {
+        return RegionLineRegex().Replace(content, string.Empty);
     }
 
     public static string RemoveSuppressMessageAttributes(string input) {

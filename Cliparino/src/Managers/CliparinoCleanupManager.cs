@@ -1,124 +1,64 @@
-﻿#region
+﻿/*  Cliparino is a clip player for Twitch.tv built to work with Streamer.bot.
+    Copyright (C) 2024 Scott Mongrain - (angrmgmt@gmail.com)
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301
+    USA
+*/
+
+#region
 
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Streamer.bot.Common.Events;
 using Streamer.bot.Plugin.Interface;
 using Streamer.bot.Plugin.Interface.Enums;
 using Streamer.bot.Plugin.Interface.Model;
-using Streamer.bot.Common.Events;
 
 #endregion
 
 public class CliparinoCleanupManager {
     private readonly IInlineInvokeProxy _cph;
     private readonly CPHLogger _logger;
+    private readonly SemaphoreSlim _semaphore = new SemaphoreSlim(1, 1);
+    private bool _disposed;
 
     public CliparinoCleanupManager(IInlineInvokeProxy cph, CPHLogger logger) {
-        _cph = cph;
-        _logger = logger;
+        _cph = cph ?? throw new ArgumentNullException(nameof(cph));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task CleanupAsync() {
-        _logger.Log(LogLevel.Info, "Cleaning up Cliparino resources...");
-
-        await Task.Delay(500);
-
-        _cph.ExecuteAction("CleanupServer");
-    }
-
-    public void ReleaseSemaphore(SemaphoreSlim semaphore) {
-        if (semaphore.CurrentCount != 0) return;
-
-        semaphore.Release();
-        _logger.Log(LogLevel.Debug, "Released semaphore lock.");
-    }
-}
-
-internal class MiscCleanupMethods {
-    private async Task CleanupServer(HttpListener server = null) {
-        _logger.Log(LogLevel.Debug, "Entering CleanupServer.");
-
-        using (new ScopedSemaphore(ServerSemaphore, Log)) {
-            try {
-                await CancelAllOperationsAsync();
-
-                var serverInstance = TakeServerInstance(server);
-
-                await CleanupListeningTaskAsync();
-
-                StopAndDisposeServer(serverInstance);
-            } catch (Exception ex) {
-                _logger.Log(LogLevel.Error, $"Unexpected error during CleanupServer: {ex.Message}");
-            }
-        }
-
-        _logger.Log(LogLevel.Debug, "Exiting CleanupServer.");
-    }
-
-    private async Task CancelAllOperationsAsync() {
-        if (_cancellationTokenSource == null) {
-            _logger.Log(LogLevel.Debug, "Cancellation token source is already null.");
-
-            return;
-        }
-
-        using (await ScopedSemaphore.WaitAsync(TokenSemaphore, Log)) {
-            try {
-                _cancellationTokenSource.Cancel();
-                _logger.Log(LogLevel.Debug, "All ongoing operations canceled.");
-            } catch (Exception ex) {
-                _logger.Log(LogLevel.Error, $"Error while canceling operations: {ex.Message}");
-            }
-        }
-    }
-
-    private HttpListener TakeServerInstance(HttpListener server) {
-        lock (ServerLock) {
-            if (_server == null && server == null) Log(LogLevel.Warn, "No server instance available for cleanup.");
-
-            var instance = server ?? _server;
-
-            // Ensure the server is nullified regardless of whether it was passed or taken.
-            _server = null;
-
-            return instance;
-        }
-    }
-
-    private async Task CleanupListeningTaskAsync() {
-        if (_listeningTask == null) {
-            _logger.Log(LogLevel.Debug, "No listening task to cleanup.");
-
-            return;
-        }
-
-        _logger.Log(LogLevel.Debug, "Cleaning up listening task.");
+    public async Task CleanupResources() {
+        await _semaphore.WaitAsync();
 
         try {
-            await _listeningTask;
-        } catch (OperationCanceledException) {
-            _logger.Log(LogLevel.Info, "Listening task gracefully canceled.");
+            _logger.Log(LogLevel.Info, "CliparinoCleanupManager: Cleaning up resources.");
+            _cph.SetGlobalVar("last_clip_url", null);
         } catch (Exception ex) {
-            _logger.Log(LogLevel.Error, $"Error cleaning up listening task: {ex.Message}");
+            _logger.Log(LogLevel.Error, "CliparinoCleanupManager: Error during cleanup.", ex);
         } finally {
-            _listeningTask = null;
+            _semaphore.Release();
         }
     }
 
-    private void StopAndDisposeServer(HttpListener serverInstance) {
-        if (serverInstance == null) {
-            _logger.Log(LogLevel.Info, "No server instance to stop or dispose.");
+    public void Dispose() {
+        if (_disposed) return;
 
-            return;
-        }
+        _disposed = true;
 
-        try {
-            serverInstance.Stop();
-            serverInstance.Close();
-            _logger.Log(LogLevel.Info, "Server successfully stopped and disposed.");
-        } catch (Exception ex) {
-            _logger.Log(LogLevel.Error, $"Error stopping or disposing server: {ex.Message}");
-        }
+        _semaphore.Dispose();
+        _logger.Log(LogLevel.Info, "CliparinoCleanupManager: Disposed resources.");
     }
 }
