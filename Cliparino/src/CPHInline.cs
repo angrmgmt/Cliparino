@@ -35,37 +35,45 @@ using Streamer.bot.Plugin.Interface.Model;
 ///     commands. Interacts with Twitch and OBS APIs to stream or display clip content.
 /// </summary>
 public class CPHInline : CPHInlineBase {
-    private CliparinoCleanupManager _cleanupManager;
+    private static HttpManager _httpManager;
+    public static Dimensions Dimensions;
     private ClipManager _clipManager;
-    private HttpManager _httpManager;
+    private bool _initialized;
     private CPHLogger _logger;
     private bool _loggingEnabled;
     private ObsSceneManager _obsSceneManager;
     private TwitchApiManager _twitchApiManager;
 
     // ReSharper disable once UnusedMember.Global
-    public void Init() {
-        _loggingEnabled = GetArgument("logging", false);
-
-        _logger = new CPHLogger(CPH, _loggingEnabled);
-        _obsSceneManager = new ObsSceneManager(CPH, _logger);
-        _httpManager = new HttpManager(_logger, _twitchApiManager);
-        _twitchApiManager = new TwitchApiManager(CPH, _logger, _httpManager);
-        _clipManager = new ClipManager(CPH, _logger, _twitchApiManager);
-        _cleanupManager = new CliparinoCleanupManager(CPH, _logger);
-
-        _httpManager.StartServer();
-    }
-
-    // ReSharper disable once UnusedMember.Global
     public bool Execute() {
-        _logger.Log(LogLevel.Debug, "Cliparino Execute started.");
+        InitializeComponents();
+
+        if (_logger == null) {
+            CPH.LogDebug("Logger is null. Attempting to reinitialize.");
+
+            try {
+                _logger = new CPHLogger(CPH, false);
+                _logger.Log(LogLevel.Debug, "Logger reinitialized successfully.");
+            } catch (Exception ex) {
+                CPH.LogError($"Logger failed to reinitialize. {ex.Message ?? "Unknown error"}\n{ex.StackTrace}");
+
+                return false;
+            }
+        }
+
+        if (_obsSceneManager == null || _clipManager == null || _twitchApiManager == null || _httpManager == null) {
+            _logger.Log(LogLevel.Error, "One or more dependencies are null after initialization.");
+
+            return false;
+        }
+
+        _logger.Log(LogLevel.Debug, "Execute started.");
 
         try {
-            var command = GetArgument("command", "");
+            var command = GetArgument(CPH, "command", "");
 
             if (string.IsNullOrWhiteSpace(command)) {
-                _logger.Log(LogLevel.Warn, "Command argument is missing.");
+                _logger.Log(LogLevel.Error, "Command argument is missing.");
 
                 return false;
             }
@@ -73,27 +81,65 @@ public class CPHInline : CPHInlineBase {
             _logger.Log(LogLevel.Info, $"Executing command: {command}");
 
             switch (command.ToLower()) {
-                case "!watch": HandleWatchCommand(GetArgument("input0", "")).GetAwaiter().GetResult(); break;
-                case "!so": HandleShoutoutCommand(GetArgument("input0", "")).GetAwaiter().GetResult(); break;
-                case "!replay": HandleReplayCommand().GetAwaiter().GetResult(); break;
-                case "!stop": HandleStopCommand().GetAwaiter().GetResult(); break;
+                case "!watch": return HandleWatchCommand(GetArgument(CPH, "input0", "")).GetAwaiter().GetResult();
+                case "!so": return HandleShoutoutCommand(GetArgument(CPH, "input0", "")).GetAwaiter().GetResult();
+                case "!replay": return HandleReplayCommand().GetAwaiter().GetResult();
+                case "!stop": return HandleStopCommand().GetAwaiter().GetResult();
                 default:
-                    _logger.Log(LogLevel.Warn, $"Unknown command: {command}");
+                    _logger.Log(LogLevel.Warn, $"Unknown command received: {command}");
 
                     return false;
             }
-
-            return true;
         } catch (Exception ex) {
-            _logger.Log(LogLevel.Error, "An error occurred while executing Cliparino.", ex);
+            _logger.Log(LogLevel.Error, "Critical failure during execution.", ex);
 
             return false;
         } finally {
-            _logger.Log(LogLevel.Debug, "Cliparino Execute completed.");
+            _logger.Log(LogLevel.Debug, "Execute completed.");
         }
     }
 
-    private async Task HandleWatchCommand(string url) {
+    private void InitializeComponents() {
+        if (_initialized) return;
+
+        CPH.LogInfo("Cliparino :: InitializeComponents :: Initializing Cliparino components...");
+        _loggingEnabled = GetArgument(CPH, "logging", false);
+
+        var height = GetArgument(CPH, "height", 1080);
+        var width = GetArgument(CPH, "width", 1920);
+
+        Dimensions = new Dimensions(height, width);
+
+        try {
+            _logger = new CPHLogger(CPH, _loggingEnabled);
+            _logger?.Log(LogLevel.Debug, "Logger initialized successfully.");
+            _twitchApiManager = new TwitchApiManager(CPH, _logger);
+
+            if (_twitchApiManager != null) _logger?.Log(LogLevel.Debug, "TwitchApiManager initialized successfully.");
+
+            _httpManager = new HttpManager(_logger, _twitchApiManager);
+
+            if (_httpManager != null) _logger?.Log(LogLevel.Debug, "HttpManager initialized successfully.");
+
+            _clipManager = new ClipManager(CPH, _logger, _twitchApiManager);
+
+            if (_clipManager != null) _logger?.Log(LogLevel.Debug, "ClipManager initialized successfully.");
+
+            _obsSceneManager = new ObsSceneManager(CPH, _logger);
+
+            if (_obsSceneManager != null) _logger?.Log(LogLevel.Debug, "ObsSceneManager initialized successfully.");
+
+            _httpManager.StartServer();
+
+            _initialized = true;
+            _logger?.Log(LogLevel.Info, "Cliparino components initialized successfully.");
+        } catch (Exception ex) {
+            _logger?.Log(LogLevel.Error, "Initialization encountered an error", ex);
+            CPH.LogError($"Critical failure during initialization. {ex.Message ?? "Unknown error"}\n{ex.StackTrace}");
+        }
+    }
+
+    private async Task<bool> HandleWatchCommand(string url) {
         _logger.Log(LogLevel.Debug, "Handling !watch command.");
 
         try {
@@ -102,51 +148,74 @@ public class CPHInline : CPHInlineBase {
             if (string.IsNullOrEmpty(clipUrl)) {
                 _logger.Log(LogLevel.Warn, "No valid clip URL provided.");
 
-                return;
+                return false;
             }
 
             var clipData = await _clipManager.GetClipDataAsync(clipUrl);
 
             _httpManager.HostClip(clipData);
-            _obsSceneManager.PlayClip(clipData);
+
+            await _obsSceneManager.PlayClip(clipData);
+            await Task.Delay((int)clipData.Duration * 1000 + 3000);
+            await HandleStopCommand();
+
             _clipManager.SetLastClipUrl(clipUrl);
+
+            return true;
         } catch (Exception ex) {
             _logger.Log(LogLevel.Error, "Error occurred while handling !watch command.", ex);
+
+            return false;
         }
     }
 
-    private async Task HandleShoutoutCommand(string username) {
+    private async Task<bool> HandleShoutoutCommand(string username) {
         _logger.Log(LogLevel.Debug, "Handling !so command.");
 
         try {
             if (string.IsNullOrWhiteSpace(username)) {
                 _logger.Log(LogLevel.Warn, "Shoutout command received without a valid username.");
 
-                return;
+                return false;
             }
 
             var clipSettings = GetClipSettings();
-            var clipData = await Task.Run(() => _clipManager.GetRandomClip(username, clipSettings));
-            var message = GetArgument("message", "");
+            var clipData = await _clipManager.GetRandomClipAsync(username, clipSettings);
+
+            if (clipData == null) {
+                _logger.Log(LogLevel.Warn, $"No valid clip found for {username}. Skipping playback.");
+
+                return false;
+            }
+
+            var message = GetArgument(CPH, "message", "");
 
             _twitchApiManager.SendShoutout(username, message);
             _httpManager.HostClip(clipData);
-            _obsSceneManager.PlayClip(clipData);
+
+            await _obsSceneManager.PlayClip(clipData);
+            await Task.Delay((int)clipData.Duration * 1000 + 3000);
+            await HandleStopCommand();
+
             _clipManager.SetLastClipUrl(clipData.Url);
+
+            return true;
         } catch (Exception ex) {
             _logger.Log(LogLevel.Error, "Error occurred while handling !so command.", ex);
+
+            return false;
         }
     }
 
     private ClipManager.ClipSettings GetClipSettings() {
-        var featuredOnly = GetArgument("featuredOnly", false);
-        var maxDuration = GetArgument("maxClipSeconds", 30);
-        var maxAgeDays = GetArgument("clipAgeDays", 30);
+        var featuredOnly = GetArgument(CPH, "featuredOnly", false);
+        var maxDuration = GetArgument(CPH, "maxClipSeconds", 30);
+        var maxAgeDays = GetArgument(CPH, "clipAgeDays", 30);
 
         return new ClipManager.ClipSettings(featuredOnly, maxDuration, maxAgeDays);
     }
 
-    private async Task HandleReplayCommand() {
+    private async Task<bool> HandleReplayCommand() {
         _logger.Log(LogLevel.Debug, "Handling !replay command.");
 
         try {
@@ -156,28 +225,77 @@ public class CPHInline : CPHInlineBase {
                 var clipData = await _clipManager.GetClipDataAsync(lastClipUrl);
 
                 _httpManager.HostClip(clipData);
-                _obsSceneManager.PlayClip(clipData);
-            } else {
-                _logger.Log(LogLevel.Warn, "No clip available for replay.");
+
+                await _obsSceneManager.PlayClip(clipData);
+                await Task.Delay((int)clipData.Duration * 1000 + 3000);
+                await HandleStopCommand();
+
+                return true;
             }
+
+            _logger.Log(LogLevel.Warn, "No clip available for replay.");
+
+            return false;
         } catch (Exception ex) {
             _logger.Log(LogLevel.Error, "Error occurred while handling !replay command.", ex);
+
+            return false;
         }
     }
 
-    private async Task HandleStopCommand() {
+    // ReSharper disable once UnusedMember.Global
+    public bool StopClip() {
+        try {
+            if (_logger == null) {
+                CPH.LogError("Logger is null. Aborting stop command handling.");
+
+                return false;
+            }
+
+            _logger.Log(LogLevel.Info, "Stopping clip.");
+
+            HandleStopCommand().GetAwaiter().GetResult();
+
+            return true;
+        } catch (Exception ex) {
+            _logger?.Log(LogLevel.Error, "Error occurred while stopping clip.", ex);
+
+            return false;
+        }
+    }
+
+    private async Task<bool> HandleStopCommand() {
         _logger.Log(LogLevel.Debug, "Handling !stop command.");
 
         try {
-            _obsSceneManager.StopClip();
-            _httpManager.StopHosting();
-            await _cleanupManager.CleanupResources();
+            await _obsSceneManager.StopClip();
+            await _httpManager.StopHosting();
+
+            _httpManager.Client.CancelPendingRequests();
+
+            return true;
         } catch (Exception ex) {
             _logger.Log(LogLevel.Error, "Error occurred while handling !stop command.", ex);
+
+            return false;
         }
     }
 
-    private T GetArgument<T>(string argName, T defaultValue = default) {
-        return CPH.TryGetArg(argName, out T value) ? value : defaultValue;
+    private static T GetArgument<T>(IInlineInvokeProxy cph, string argName, T defaultValue = default) {
+        return cph.TryGetArg(argName, out T value) ? value : defaultValue;
     }
+
+    public static HttpManager GetHttpManager() {
+        return _httpManager;
+    }
+}
+
+public class Dimensions {
+    public Dimensions(int height = 1080, int width = 1920) {
+        Height = height;
+        Width = width;
+    }
+
+    public int Height { get; }
+    public int Width { get; }
 }

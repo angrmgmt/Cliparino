@@ -1,4 +1,4 @@
-﻿/*  Cliparino is a clip player for Twitch.tv built to work with Streamer.bot.
+/*  Cliparino is a clip player for Twitch.tv built to work with Streamer.bot.
     Copyright (C) 2024 Scott Mongrain - (angrmgmt@gmail.com)
 
     This library is free software; you can redistribute it and/or
@@ -20,7 +20,9 @@
 #region
 
 using System;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Streamer.bot.Common.Events;
 using Streamer.bot.Plugin.Interface;
 using Streamer.bot.Plugin.Interface.Enums;
@@ -34,10 +36,6 @@ public class ObsSceneManager {
     private const string PlayerSourceName = "Player";
     private const string ActiveUrl = "http://localhost:8080/";
     private const string InactiveUrl = "about:blank";
-    private const string GetSceneItemIdErrorCode = "{\"code\":600}";
-
-    private const string GetSceneItemIdErrorMessage =
-        "Error: No scene items were found in the specified scene by that name or offset.";
 
     private readonly IInlineInvokeProxy _cph;
     private readonly CPHLogger _logger;
@@ -47,7 +45,9 @@ public class ObsSceneManager {
         _logger = logger;
     }
 
-    public void PlayClip(ClipData clipData) {
+    private static Dimensions Dimensions => CPHInline.Dimensions;
+
+    public async Task PlayClip(ClipData clipData) {
         if (clipData == null) {
             _logger.Log(LogLevel.Error, "No clip data provided.");
 
@@ -62,15 +62,49 @@ public class ObsSceneManager {
             return;
         }
 
+        _logger.Log(LogLevel.Info, $"Playing clip '{clipData.Title}' ({clipData.Url}).");
         SetUpCliparino();
         ShowCliparino(scene);
-        SetBrowserSource(ActiveUrl);
+
+        await SetBrowserSourceAsync(ActiveUrl);
+        await LogPlayerState();
     }
 
-    public void StopClip() {
+    public async Task StopClip() {
         _logger.Log(LogLevel.Info, "Stopping clip playback.");
-        SetBrowserSource(InactiveUrl);
+
+        await LogPlayerState();
+        await SetBrowserSourceAsync(InactiveUrl);
+
         HideCliparino(CurrentScene());
+    }
+
+    private async Task LogPlayerState() {
+        await Task.Delay(1000);
+
+        var browserSourceUrl = GetPlayerUrl().Contains("Error") ? "No URL found." : GetPlayerUrl();
+        var isBrowserVisible = _cph.ObsIsSourceVisible(CliparinoSourceName, PlayerSourceName);
+
+        _logger.Log(LogLevel.Debug,
+                    $"Browser Source '{PlayerSourceName}' details - URL: {browserSourceUrl}, Visible: {isBrowserVisible}");
+    }
+
+    private string GetPlayerUrl() {
+        var playerUrl = GetPlayerSettings()?["url"]?.ToString();
+
+        _logger.Log(LogLevel.Debug, $"Player URL: {playerUrl}");
+
+        return playerUrl ?? "Error: No URL found.";
+    }
+
+    private JObject GetPlayerSettings() {
+        var payload = new Payload {
+            RequestType = "GetInputSettings", RequestData = new { inputName = PlayerSourceName }
+        };
+
+        return JsonConvert.DeserializeObject<JObject>(_cph.ObsSendRaw(payload.RequestType,
+                                                                      JsonConvert
+                                                                          .SerializeObject(payload.RequestData)));
     }
 
     private string CurrentScene() {
@@ -105,10 +139,10 @@ public class ObsSceneManager {
         }
     }
 
-    private void SetBrowserSource(string url) {
+    private async Task SetBrowserSourceAsync(string url) {
         try {
-            _cph.ObsSetBrowserSource(CliparinoSourceName, PlayerSourceName, url);
-            ConfigureAudioSettings();
+            _logger.Log(LogLevel.Debug, $"Setting Player URL to '{url}'.");
+            await Task.Run(() => _cph.ObsSetBrowserSource(CliparinoSourceName, PlayerSourceName, url));
         } catch (Exception ex) {
             _logger.Log(LogLevel.Error, "Error setting OBS browser source.", ex);
         }
@@ -124,6 +158,8 @@ public class ObsSceneManager {
             if (!PlayerExists()) {
                 _logger.Log(LogLevel.Info, "Adding Player source to Cliparino scene.");
                 AddPlayerToCliparino();
+                _logger.Log(LogLevel.Info, $"Configuring audio for source: {PlayerSourceName}");
+                ConfigureAudioSettings();
             }
 
             if (CliparinoInCurrentScene()) return;
@@ -137,10 +173,9 @@ public class ObsSceneManager {
 
     private bool SourceIsInScene(string scene, string source) {
         var response = GetSceneItemId(scene, source);
-        var notAnError = response != GetSceneItemIdErrorCode && response != GetSceneItemIdErrorMessage;
-        var gotAnId = response.sceneItemId is int;
+        var itemId = response is string ? -1 : response.sceneItemId;
 
-        return notAnError && gotAnId;
+        return itemId > 0;
     }
 
     private bool PlayerExists() {
@@ -170,14 +205,56 @@ public class ObsSceneManager {
         };
 
         _cph.ObsSendRaw(payload.RequestType, JsonConvert.SerializeObject(payload.RequestData));
+
+        if (CliparinoInCurrentScene())
+            _logger.Log(LogLevel.Info, $"Added Cliparino to scene '{CurrentScene()}'.");
+        else
+            _logger.Log(LogLevel.Error, $"Failed to add Cliparino to scene '{CurrentScene()}'.");
     }
 
     private void AddPlayerToCliparino() {
         try {
-            _cph.ObsSetBrowserSource(CliparinoSourceName, PlayerSourceName, InactiveUrl);
+            if (Dimensions == null) {
+                _logger.Log(LogLevel.Error, "CPHInline.Dimensions is null. Cannot add Player to Cliparino.");
 
-            _logger.Log(LogLevel.Info,
-                        $"Browser source '{PlayerSourceName}' added to scene '{CliparinoSourceName}' with URL '{InactiveUrl}'.");
+                return;
+            }
+
+            var height = Dimensions.Height;
+            var width = Dimensions.Width;
+
+            _logger.Log(LogLevel.Debug, $"Adding Player source to Cliparino with dimensions: {width}x{height}.");
+
+            var inputSettings = new {
+                fps = 60,
+                fps_custom = true,
+                height,
+                reroute_audio = true,
+                restart_when_active = true,
+                shutdown = true,
+                url = InactiveUrl,
+                webpage_control_level = 2,
+                width
+            };
+            var payload = new Payload {
+                RequestType = "CreateInput",
+                RequestData = new {
+                    sceneName = CliparinoSourceName,
+                    inputName = PlayerSourceName,
+                    inputKind = "browser_source",
+                    inputSettings,
+                    sceneItemEnabled = true
+                }
+            };
+
+            var response = _cph.ObsSendRaw(payload.RequestType, JsonConvert.SerializeObject(payload.RequestData));
+
+            if (PlayerExists())
+                _logger.Log(LogLevel.Info,
+                            $"Browser source '{PlayerSourceName}' added to scene '{CliparinoSourceName}' with URL '{InactiveUrl}'.");
+            else
+                _logger.Log(LogLevel.Error,
+                            $"Browser source '{PlayerSourceName}' could not be added.\nResponse: {response}");
         } catch (Exception ex) {
             _logger.Log(LogLevel.Error, "An error occurred while adding the Player source to Cliparino.", ex);
         }
@@ -185,10 +262,17 @@ public class ObsSceneManager {
 
     private void CreateCliparinoScene() {
         try {
-            var payload = new Payload { RequestType = "CreateScene", RequestData = new { CliparinoSourceName } };
+            var payload = new Payload {
+                RequestType = "CreateScene", RequestData = new { sceneName = CliparinoSourceName }
+            };
 
-            _cph.ObsSendRaw(payload.RequestType, JsonConvert.SerializeObject(payload.RequestData));
-            _logger.Log(LogLevel.Info, $"Scene '{CliparinoSourceName}' created successfully.");
+            var response = _cph.ObsSendRaw(payload.RequestType, JsonConvert.SerializeObject(payload.RequestData));
+
+            if (CliparinoExists())
+                _logger.Log(LogLevel.Info, $"Scene '{CliparinoSourceName}' created successfully.");
+            else
+                _logger.Log(LogLevel.Error,
+                            $"Scene '{CliparinoSourceName}' could not be created.\nResponse: {response}");
         } catch (Exception ex) {
             _logger.Log(LogLevel.Error, $"Error in CreateCliparinoScene: {ex.Message}");
         }
@@ -209,9 +293,6 @@ public class ObsSceneManager {
             var sceneExists = false;
             var response = JsonConvert.DeserializeObject<dynamic>(_cph.ObsSendRaw("GetSceneList", "{}"));
 
-            _logger.Log(LogLevel.Debug,
-                        $"The result of the scene list request was {JsonConvert.SerializeObject(response)}");
-
             var scenes = response?.scenes;
 
             _logger.Log(LogLevel.Debug, $"Scenes pulled from OBS: {JsonConvert.SerializeObject(scenes)}");
@@ -227,8 +308,6 @@ public class ObsSceneManager {
 
             if (!sceneExists) _logger.Log(LogLevel.Warn, $"Scene '{sceneName}' does not exist.");
 
-            _logger.Log(LogLevel.Debug, $"Scene {sceneName} exists: {sceneExists}");
-
             return sceneExists;
         } catch (Exception ex) {
             _logger.Log(LogLevel.Error, "An error occurred while checking if Cliparino scene exists.", ex);
@@ -238,8 +317,14 @@ public class ObsSceneManager {
     }
 
     private void ConfigureAudioSettings() {
+        if (!PlayerExists()) {
+            _logger.Log(LogLevel.Warn, "Cannot configure audio settings because Player source doesn't exist.");
+
+            return;
+        }
+
         try {
-            var monitorTypePayload = GenerateSetAudioMonitorTypePayload("monitorAndOutput");
+            var monitorTypePayload = GenerateSetInputAudioMonitorTypePayload("OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT");
             var monitorTypeResponse = _cph.ObsSendRaw(monitorTypePayload.RequestType,
                                                       JsonConvert.SerializeObject(monitorTypePayload.RequestData));
 
@@ -249,7 +334,7 @@ public class ObsSceneManager {
                 return;
             }
 
-            var inputVolumePayload = GenerateSetInputVolumePayload(0);
+            var inputVolumePayload = GenerateSetInputVolumePayload(-6);
             var inputVolumeResponse = _cph.ObsSendRaw(inputVolumePayload.RequestType,
                                                       JsonConvert.SerializeObject(inputVolumePayload.RequestData));
 
@@ -260,7 +345,7 @@ public class ObsSceneManager {
                 return;
             }
 
-            var gainFilterPayload = GenerateGainFilterPayload(0);
+            var gainFilterPayload = GenerateGainFilterPayload(3);
             var gainFilterResponse = _cph.ObsSendRaw(gainFilterPayload.RequestType,
                                                      JsonConvert.SerializeObject(gainFilterPayload.RequestData));
 
@@ -289,15 +374,18 @@ public class ObsSceneManager {
 
     private static IPayload GenerateCompressorFilterPayload() {
         return new Payload {
-            RequestType = "SetInputSettings",
+            RequestType = "CreateSourceFilter",
             RequestData = new {
-                inputName = "Player",
-                inputSettings = new {
-                    threshold = -15.0,
-                    ratio = 4.0,
-                    attack = 1.0,
-                    release = 50.0,
-                    makeUpGain = 0.0
+                sourceName = "Player",
+                filterName = "Compressor",
+                filterKind = "compressor_filter",
+                filterSettings = new {
+                    attack_time = 69,
+                    output_gain = 0,
+                    ratio = 4,
+                    release_time = 120,
+                    sidechain_source = "Mic/Aux",
+                    threshold = -28
                 }
             }
         };
@@ -305,22 +393,25 @@ public class ObsSceneManager {
 
     private static IPayload GenerateGainFilterPayload(double gainValue) {
         return new Payload {
-            RequestType = "SetInputSettings",
-            RequestData = new { inputName = "Player", inputSettings = new { gain = gainValue } }
+            RequestType = "CreateSourceFilter",
+            RequestData = new {
+                sourceName = "Player",
+                filterName = "Gain",
+                filterKind = "gain_filter",
+                filterSettings = new { db = gainValue }
+            }
         };
     }
 
     private static IPayload GenerateSetInputVolumePayload(double volumeValue) {
         return new Payload {
-            RequestType = "SetInputVolume",
-            RequestData = new { inputName = "Player", inputSettings = new { volume = volumeValue } }
+            RequestType = "SetInputVolume", RequestData = new { inputName = "Player", inputVolumeDb = volumeValue }
         };
     }
 
-    private static IPayload GenerateSetAudioMonitorTypePayload(string monitorType) {
+    private static IPayload GenerateSetInputAudioMonitorTypePayload(string monitorType) {
         return new Payload {
-            RequestType = "SetAudioMonitorType",
-            RequestData = new { inputName = "Player", inputSettings = new { monitorType } }
+            RequestType = "SetInputAudioMonitorType", RequestData = new { inputName = "Player", monitorType }
         };
     }
 

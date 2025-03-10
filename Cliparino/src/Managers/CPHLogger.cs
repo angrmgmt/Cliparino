@@ -55,11 +55,12 @@ public class CPHLogger {
     }
 
     private void LogError(string message, Exception ex = null) {
-        if (ex == null) throw new ArgumentNullException(nameof(ex));
-
-        _cph.LogError($"[Cliparino] {message}\nException: {ex.Message}");
-
-        _cph.LogDebug($"[Cliparino] StackTrace: {ex.StackTrace}");
+        if (ex == null) {
+            _cph.LogError(message);
+        } else {
+            _cph.LogError($"{message}\nException: {ex.Message}");
+            _cph.LogDebug($"StackTrace: {ex.StackTrace}");
+        }
     }
 }
 

@@ -33,16 +33,16 @@ using Twitch.Common.Models.Api;
 
 public class TwitchApiManager {
     private readonly IInlineInvokeProxy _cph;
-    private readonly HttpManager _httpManager;
     private readonly CPHLogger _logger;
     private readonly OAuthInfo _oauthInfo;
 
-    public TwitchApiManager(IInlineInvokeProxy cph, CPHLogger logger, HttpManager httpManager) {
+    public TwitchApiManager(IInlineInvokeProxy cph, CPHLogger logger) {
         _cph = cph ?? throw new ArgumentNullException(nameof(cph));
         _logger = logger;
-        _httpManager = httpManager;
         _oauthInfo = new OAuthInfo(cph.TwitchClientId, cph.TwitchOAuthToken);
     }
+
+    private static HttpManager HTTPManager => CPHInline.GetHttpManager();
 
     public void SendShoutout(string username, string message) {
         if (string.IsNullOrWhiteSpace(username)) {
@@ -64,11 +64,12 @@ public class TwitchApiManager {
         var shoutoutMessage = !string.IsNullOrWhiteSpace(message) ? FormatShoutoutMessage(user, message) : "";
 
         _cph.SendMessage(shoutoutMessage);
+        _cph.TwitchSendShoutoutByLogin(username);
         _logger.Log(LogLevel.Info, $"Shoutout sent for {username}.");
     }
 
     private static string FormatShoutoutMessage(TwitchUserInfoEx user, string message) {
-        return message.Replace("[[userName]]", user.UserName).Replace("[[userGameName]]", user.Game);
+        return message.Replace("[[userName]]", user.UserName).Replace("[[userGame]]", user.Game);
     }
 
     public async Task<ClipData> FetchClipById(string clipId) {
@@ -80,14 +81,11 @@ public class TwitchApiManager {
     }
 
     private async Task<T> FetchDataAsync<T>(string endpoint) {
-        if (string.IsNullOrWhiteSpace(endpoint))
-            throw new ArgumentNullException(nameof(endpoint), "Endpoint cannot be null or empty.");
+        ValidateEndpoint(endpoint);
+        ValidateOAuthInfo();
+        LogHttpManagerValidity();
 
-        if (string.IsNullOrWhiteSpace(_oauthInfo.TwitchClientId)
-            || string.IsNullOrWhiteSpace(_oauthInfo.TwitchOAuthToken))
-            throw new InvalidOperationException("Twitch OAuth information is missing or invalid.");
-
-        var completeUrl = new Uri(_httpManager.Client.BaseAddress, endpoint).ToString();
+        var completeUrl = GetCompleteUrl(endpoint);
 
         _logger.Log(LogLevel.Debug, $"Preparing to make GET request to endpoint: {completeUrl}");
 
@@ -97,17 +95,8 @@ public class TwitchApiManager {
             if (string.IsNullOrWhiteSpace(content)) return default;
 
             _logger.Log(LogLevel.Debug, $"Response content: {content}");
-            var apiResponse = JsonConvert.DeserializeObject<TwitchApiResponse<T>>(content);
 
-            if (apiResponse?.Data != null && apiResponse.Data.Length > 0) {
-                _logger.Log(LogLevel.Info, "Successfully retrieved and deserialized data from Twitch API.");
-
-                return apiResponse.Data[0];
-            }
-
-            _logger.Log(LogLevel.Error, $"No data returned from Twitch API for endpoint: {endpoint}");
-
-            return default;
+            return DeserializeApiResponse<T>(content, endpoint);
         } catch (JsonException ex) {
             _logger.Log(LogLevel.Error, $"JSON deserialization error for response from {endpoint}.", ex);
 
@@ -119,8 +108,50 @@ public class TwitchApiManager {
         }
     }
 
+    private static void ValidateEndpoint(string endpoint) {
+        if (string.IsNullOrWhiteSpace(endpoint))
+            throw new ArgumentNullException(nameof(endpoint), "Endpoint cannot be null or empty.");
+    }
+
+    private void ValidateOAuthInfo() {
+        if (string.IsNullOrWhiteSpace(_oauthInfo.TwitchClientId)
+            || string.IsNullOrWhiteSpace(_oauthInfo.TwitchOAuthToken))
+            throw new InvalidOperationException("Twitch OAuth information is missing or invalid.");
+    }
+
+    private void LogHttpManagerValidity() {
+        var httpManValid = HTTPManager != null;
+        var httpClientValid = HTTPManager?.Client != null;
+        var baseUriValid = HTTPManager?.Client?.BaseAddress != null;
+        var validConditionsMet = httpManValid && httpClientValid && baseUriValid;
+
+        _logger.Log(LogLevel.Debug, $"Checking validity of HTTP manager components... {validConditionsMet}");
+        _logger.Log(LogLevel.Debug,
+                    $"HTTP Manager: {httpManValid}, HTTP Client: {httpClientValid}, Base URI: {baseUriValid}");
+    }
+
+    private string GetCompleteUrl(string endpoint) {
+        var baseAddress = HTTPManager?.Client?.BaseAddress?.ToString() ?? "https://www.google.com";
+
+        return new Uri(new Uri(baseAddress), endpoint).ToString();
+    }
+
+    private T DeserializeApiResponse<T>(string content, string endpoint) {
+        var apiResponse = JsonConvert.DeserializeObject<TwitchApiResponse<T>>(content);
+
+        if (apiResponse?.Data != null && apiResponse.Data.Length > 0) {
+            _logger.Log(LogLevel.Info, "Successfully retrieved and deserialized data from Twitch API.");
+
+            return apiResponse.Data[0];
+        }
+
+        _logger.Log(LogLevel.Error, $"No data returned from Twitch API for endpoint: {endpoint}");
+
+        return default;
+    }
+
     private void ConfigureHttpRequestHeaders() {
-        var client = _httpManager.Client;
+        var client = HTTPManager.Client;
 
         client.DefaultRequestHeaders.Clear();
         client.DefaultRequestHeaders.Add("Client-ID", _oauthInfo.TwitchClientId);
@@ -130,18 +161,28 @@ public class TwitchApiManager {
     private async Task<string> SendHttpRequestAsync(string endpoint) {
         try {
             ConfigureHttpRequestHeaders();
+
+            foreach (var header in HTTPManager.Client.DefaultRequestHeaders)
+                _logger.Log(LogLevel.Debug,
+                            header.Key == "Authorization"
+                                ? $"Header: {header.Key}: {string.Join(",", OAuthInfo.ObfuscateString(_oauthInfo.TwitchOAuthToken))}"
+                                : $"Header: {header.Key}: {string.Join(",", header.Value)}");
+
             _logger.Log(LogLevel.Debug, "HTTP headers set successfully. Initiating request...");
 
-            var response = await _httpManager.Client.GetAsync(endpoint);
+            var response = await HTTPManager.Client.GetAsync(endpoint);
+            var responseBody = await response.Content.ReadAsStringAsync();
 
-            _logger.Log(LogLevel.Debug, $"Received response: {response.StatusCode} ({(int)response.StatusCode})");
+            _logger.Log(LogLevel.Debug,
+                        $"Received response: {response.StatusCode} ({(int)response.StatusCode})\nContent: {responseBody}");
 
-            if (response.IsSuccessStatusCode) return await response.Content.ReadAsStringAsync();
+            if (response.IsSuccessStatusCode) return responseBody;
 
             _logger.Log(LogLevel.Error,
                         $"Request to Twitch API failed: {response.ReasonPhrase} (Status Code: {(int)response.StatusCode}, URL: {endpoint})");
 
-            return null;
+            throw new
+                HttpRequestException($"Request to Twitch API failed: {response.ReasonPhrase} (Status Code: {(int)response.StatusCode})");
         } catch (HttpRequestException ex) {
             _logger.Log(LogLevel.Error, $"HTTP request error while calling {endpoint}.", ex);
 
@@ -160,6 +201,24 @@ public class TwitchApiManager {
 
         public string TwitchClientId { get; }
         public string TwitchOAuthToken { get; }
+
+        public override string ToString() {
+            return $"Client ID: {TwitchClientId}, OAuth Token: {ObfuscateString(TwitchOAuthToken)}";
+        }
+
+        public static string ObfuscateString(string input) {
+            if (string.IsNullOrEmpty(input)) return string.Empty;
+
+            const string obfuscationSymbol = "...";
+
+            var visibleLength = Math.Max(1, input.Length / 3);
+            var prefixLength = visibleLength / 2;
+            var suffixLength = visibleLength - prefixLength;
+
+            return input.Length <= visibleLength + obfuscationSymbol.Length
+                       ? obfuscationSymbol
+                       : $"{input.Substring(0, prefixLength)}{obfuscationSymbol}{input.Substring(input.Length - suffixLength)}";
+        }
     }
 
     public class TwitchApiResponse<T> {

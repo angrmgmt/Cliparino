@@ -29,6 +29,10 @@ internal static class RegexUtilities {
         return new Regex(@"^\s*\n", RegexOptions.Multiline);
     }
 
+    private static Regex DevEnvInheritanceRegex() {
+        return new Regex(@"\s{1}\:\s{1}CPHInlineBase", RegexOptions.Multiline);
+    }
+
     public static string RemoveXmlDocComments(string input) {
         return XmlDocCommentsRegex().Replace(input, string.Empty);
     }
@@ -51,5 +55,9 @@ internal static class RegexUtilities {
 
     public static string TrimBlankLines(string input) {
         return BlankLinesRegex().Replace(input, string.Empty);
+    }
+
+    public static string RemoveDevEnvInheritance(string input) {
+        return DevEnvInheritanceRegex().Replace(input, string.Empty);
     }
 }

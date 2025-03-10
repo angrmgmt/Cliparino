@@ -21,7 +21,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -87,7 +86,7 @@ public class HttpManager {
     }
 
     .line2 {
-        font: normal 400 1.5em/1 'OpenDyslexic', 'Open Sans', sans-serif;
+        font: normal 400 1.5em/1.2 'OpenDyslexic', 'Open Sans', sans-serif;
     }
 
     .line3 {
@@ -125,7 +124,6 @@ public class HttpManager {
     private readonly TwitchApiManager _twitchApiManager;
     public readonly HttpClient Client;
     private ClipData _clipData;
-    private string _currentClipEmbedUrl;
     private HttpListener _listener;
 
     public HttpManager(CPHLogger logger, TwitchApiManager twitchApiManager) {
@@ -160,16 +158,21 @@ public class HttpManager {
         }
     }
 
-    public void StopHosting() {
-        _currentClipEmbedUrl = null;
+    public async Task StopHosting() {
         _logger.Log(LogLevel.Info, "Stopped hosting clip.");
+
+        await Task.Run(() => {
+                           Client.CancelPendingRequests();
+                           _listener?.Close();
+                       });
     }
 
     public void HostClip(ClipData clipData) {
         try {
             _clipData = clipData ?? throw new ArgumentNullException(nameof(clipData));
-            _currentClipEmbedUrl = $"https://clips.twitch.tv/embed?clip={clipData.Id}&parent=localhost";
             _logger.Log(LogLevel.Info, $"Hosting clip {clipData.Id}");
+        } catch (ArgumentNullException argEx) {
+            _logger.Log(LogLevel.Error, "Error while hosting clip.", argEx);
         } catch (Exception ex) {
             _logger.Log(LogLevel.Error, "Error while hosting clip.", ex);
         }
@@ -188,6 +191,7 @@ public class HttpManager {
 
             switch (requestPath) {
                 case "/index.css": Task.Run(() => ServeCSS(context)); break;
+                case "/favicon.ico": context.Response.StatusCode = 204; break;
                 case "/index.html":
                 case "/":
                     Task.Run(() => ServeHTML(context));
@@ -236,15 +240,24 @@ public class HttpManager {
     }
 
     private async Task<string> PreparePage(string nonce) {
-        var gameName = (await _twitchApiManager.FetchGameById(_clipData.GameId)).Name;
-        var page = HTMLText.Replace("[[clipId]]", _currentClipEmbedUrl.Split('/').Last())
-                           .Replace("[[nonce]]", nonce)
-                           .Replace("[[streamerName]]", _clipData.BroadcasterName)
-                           .Replace("[[gameName]]", gameName)
-                           .Replace("[[clipTitle]]", _clipData.Title)
-                           .Replace("[[curatorName]]", _clipData.CreatorName);
+        if (string.IsNullOrWhiteSpace(nonce))
+            throw new ArgumentNullException(nameof(nonce), "Nonce cannot be null or empty.");
 
-        return page;
+        if (_clipData == null) throw new InvalidOperationException("Clip data cannot be null.");
+
+        var gameName = (await _twitchApiManager.FetchGameById(_clipData.GameId)).Name;
+
+        if (string.IsNullOrWhiteSpace(gameName))
+            throw new InvalidOperationException("Game name cannot be null or empty.");
+
+        _logger.Log(LogLevel.Error, $"Preparing page for clip '{_clipData.Id}'...");
+
+        return HTMLText.Replace("[[clipId]]", _clipData.Id)
+                       .Replace("[[nonce]]", nonce)
+                       .Replace("[[streamerName]]", _clipData.BroadcasterName)
+                       .Replace("[[gameName]]", gameName)
+                       .Replace("[[clipTitle]]", _clipData.Title)
+                       .Replace("[[curatorName]]", _clipData.CreatorName);
     }
 
     private static HttpListenerContext ReadyHeaders(string nonce, HttpListenerContext context) {

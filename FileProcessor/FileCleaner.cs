@@ -18,8 +18,7 @@ internal static class FileProcessor {
         "../Cliparino/src/Managers/ObsSceneManager.cs",
         "../Cliparino/src/Managers/ClipManager.cs",
         "../Cliparino/src/Managers/TwitchApiManager.cs",
-        "../Cliparino/src/Managers/HttpManager.cs",
-        "../Cliparino/src/Managers/CliparinoCleanupManager.cs"
+        "../Cliparino/src/Managers/HttpManager.cs"
     };
 
     // ReSharper disable once MemberCanBePrivate.Global
@@ -89,12 +88,10 @@ internal static class FileProcessor {
     private static void ProcessFiles(IEnumerable<string> inputFiles, string outputFile) {
         Console.WriteLine($"[FileProcessor] Writing merged content to: {Path.GetFullPath(outputFile)}");
 
-        // Step 1: Extract and deduplicate all using directives
         var inputFileList = inputFiles.ToList();
         var usingDirectives = ExtractUsingDirectives(inputFileList);
 
         using (var writer = new StreamWriter(outputFile, false)) {
-            // Step 2: Write all using directives at the top
             Console.WriteLine("[FileProcessor] Writing using directives...");
 
             foreach (var directive in usingDirectives.OrderBy(u => u)) {
@@ -102,9 +99,8 @@ internal static class FileProcessor {
                 writer.WriteLine(directive);
             }
 
-            writer.WriteLine(); // Blank line after all usings
+            writer.WriteLine();
 
-            // Step 3: Process each file and append cleaned content
             foreach (var inputFile in inputFileList) {
                 if (!File.Exists(inputFile)) {
                     Console.WriteLine($"  [Warning] File not found: {inputFile}");
@@ -115,12 +111,11 @@ internal static class FileProcessor {
                 Console.WriteLine($"[FileProcessor] Processing {Path.GetFileName(inputFile)}...");
                 var content = File.ReadAllText(inputFile);
 
-                // Clean the content according to RegexUtilities methods
                 var cleanedContent = ProcessRegex(content);
                 Console.WriteLine($"  [Cleaned Content] from {Path.GetFileName(inputFile)}:\n{cleanedContent}\n");
 
-                writer.WriteLine(cleanedContent.Trim()); // Append cleaned content
-                writer.WriteLine();                      // Blank line between files
+                writer.WriteLine(cleanedContent.Trim());
+                writer.WriteLine();
             }
         }
 
@@ -131,9 +126,9 @@ internal static class FileProcessor {
         // Remove using directives
         var lines = content.Split(new[] { Environment.NewLine }, StringSplitOptions.None);
         var nonUsingLines = lines.Where(line => !line.TrimStart().StartsWith("using ", StringComparison.Ordinal));
-
         var cleanedContent = string.Join(Environment.NewLine, nonUsingLines);
 
+        cleanedContent = RegexUtilities.RemoveDevEnvInheritance(cleanedContent);
         cleanedContent = RegexUtilities.RemoveXmlDocComments(cleanedContent);
         cleanedContent = RegexUtilities.RemoveReSharperComments(cleanedContent);
         cleanedContent = RegexUtilities.RemoveBlockComments(cleanedContent);

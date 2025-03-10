@@ -54,7 +54,7 @@ public class ClipManager {
         _cph.SetGlobalVar("last_clip_url", url);
     }
 
-    public ClipData GetRandomClip(string userName, ClipSettings clipSettings) {
+    public async Task<ClipData> GetRandomClipAsync(string userName, ClipSettings clipSettings) {
         clipSettings.Deconstruct(out var featuredOnly, out var maxClipSeconds, out var clipAgeDays);
 
         _logger.Log(LogLevel.Debug,
@@ -69,22 +69,25 @@ public class ClipManager {
                 return null;
             }
 
+            var userId = twitchUser.UserId;
             var validPeriods = new[] { 1, 7, 30, 365, 36500 };
 
-            foreach (var period in validPeriods.Where(p => p >= clipAgeDays)) {
-                var clips = RetrieveClips(userName, period).ToList();
+            return await Task.Run(() => {
+                                      foreach (var period in validPeriods.Where(p => p >= clipAgeDays)) {
+                                          var clips = RetrieveClips(userId, period).ToList();
 
-                if (!clips.Any()) continue;
+                                          if (!clips.Any()) continue;
 
-                var clip = GetMatchingClip(clips, featuredOnly, maxClipSeconds, userName);
+                                          var clip = GetMatchingClip(clips, featuredOnly, maxClipSeconds, userId);
 
-                if (clip != null) return clip;
-            }
+                                          if (clip != null) return clip;
+                                      }
 
-            _logger.Log(LogLevel.Warn,
-                        $"No clips found for userName: {userName} after exhausting all periods and filter combinations.");
+                                      _logger.Log(LogLevel.Warn,
+                                                  $"No clips found for userName: {userName} after exhausting all periods and filter combinations.");
 
-            return null;
+                                      return null;
+                                  });
         } catch (Exception ex) {
             _logger.Log(LogLevel.Error, "An error occurred while getting random clip.", ex);
 
