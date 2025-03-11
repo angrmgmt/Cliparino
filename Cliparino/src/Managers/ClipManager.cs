@@ -32,6 +32,8 @@ using Twitch.Common.Models.Api;
 #endregion
 
 public class ClipManager {
+    private static readonly Dictionary<string, CachedClipData> ClipCache = new Dictionary<string, CachedClipData>();
+    private readonly object _cacheLock = new object();
     private readonly IInlineInvokeProxy _cph;
     private readonly CPHLogger _logger;
     private readonly TwitchApiManager _twitchApiManager;
@@ -192,6 +194,133 @@ public class ClipManager {
         }
     }
 
+    public async Task<ClipData> SearchClipsWithThresholdAsync(string broadcasterId, string searchTerm) {
+        _logger.Log(LogLevel.Debug,
+                    $"Searching clips for broadcaster ID: {broadcasterId} using search term: '{searchTerm}'");
+
+        try {
+            string cursor = null;
+
+            do {
+                var clipsResponse = await _twitchApiManager.FetchClipsAsync(broadcasterId, cursor);
+                var clips = clipsResponse?.Data;
+
+                if (clips == null || clips.Length == 0) {
+                    _logger.Log(LogLevel.Warn, "No clips retrieved from Twitch API.");
+
+                    return null;
+                }
+
+                var searchWords = PreprocessText(searchTerm);
+                ClipData bestClip = null;
+                double bestScore = 0;
+
+                foreach (var clip in clips) {
+                    var clipTitleWords = PreprocessText(clip.Title);
+                    var similarityScore = ComputeWordOverlap(searchWords, clipTitleWords);
+
+                    if (!(similarityScore > bestScore)) continue;
+
+                    bestScore = similarityScore;
+                    bestClip = clip;
+                }
+
+                const double similarityThreshold = 0.5;
+
+                if (bestClip != null && bestScore >= similarityThreshold) {
+                    _logger.Log(LogLevel.Debug, $"Best matching clip: {bestClip.Title} with score: {bestScore}");
+
+                    return bestClip;
+                }
+
+                cursor = clipsResponse.Pagination.Cursor;
+
+                if (!string.IsNullOrEmpty(cursor))
+                    _logger.Log(LogLevel.Debug, $"Continuing search with cursor: {cursor}");
+            } while (!string.IsNullOrWhiteSpace(cursor));
+
+            _logger.Log(LogLevel.Warn, "No matching clip found.");
+
+            return null;
+        } catch (Exception ex) {
+            _logger.Log(LogLevel.Error, "Error occurred while searching for clip.", ex);
+
+            return null;
+        }
+    }
+
+    private static List<string> PreprocessText(string text) {
+        return text.ToLowerInvariant()
+                   .Split(new[] { ' ', '\t', '\n', '\r', '.', ',', '!', '?' }, StringSplitOptions.RemoveEmptyEntries)
+                   .ToList();
+    }
+
+    private static double ComputeWordOverlap(List<string> searchWords, List<string> clipTitleWords) {
+        if (searchWords == null || clipTitleWords == null || searchWords.Count == 0 || clipTitleWords.Count == 0)
+            return 0;
+
+        var matchingWords = searchWords.Intersect(clipTitleWords).Count();
+
+        return (double)matchingWords / searchWords.Count;
+    }
+
+    public static ClipData GetFromCache(string searchTerm) {
+        if (!ClipCache.TryGetValue(searchTerm, out var cachedData)) return null;
+
+        cachedData.LastAccessed = DateTime.UtcNow;
+        cachedData.SearchFrequency++;
+
+        return cachedData.Clip;
+    }
+
+    public void AddToCache(string searchTerm, ClipData clipData) {
+        ClipCache[searchTerm] =
+            new CachedClipData { Clip = clipData, SearchFrequency = 1, LastAccessed = DateTime.UtcNow };
+
+        _logger.Log(LogLevel.Debug, $"Added '{clipData.Title}' to cache for search term: {searchTerm}");
+    }
+
+    public bool CleanCache() {
+        try {
+            lock (_cacheLock) {
+                var expirationTime = TimeSpan.FromDays(CPHInline.GetArgument(_cph, "ClipCacheExpirationDays", 30));
+                var now = DateTime.UtcNow;
+                var toRemove = ClipCache.Where(entry => now - entry.Value.LastAccessed > expirationTime)
+                                        .Select(entry => entry.Key)
+                                        .ToList();
+
+                foreach (var key in toRemove) {
+                    _logger.Log(LogLevel.Debug, $"Removing expired cache item: {key}");
+                    ClipCache.Remove(key);
+                }
+
+                return true;
+            }
+        } catch (Exception ex) {
+            _logger.Log(LogLevel.Error, "Error cleaning cache.", ex);
+
+            return false;
+        }
+    }
+
+    public class ClipsResponse {
+        public ClipsResponse(ClipData[] data = null, string cursor = "") {
+            Data = data ?? Array.Empty<ClipData>();
+            Pagination = new PaginationObject(cursor);
+        }
+
+        public ClipData[] Data { get; }
+        public PaginationObject Pagination { get; }
+    }
+
+    public class PaginationObject {
+        public PaginationObject(string cursor = "") {
+            Cursor = cursor;
+        }
+
+        public string Cursor { get; }
+    }
+
     public class ClipSettings {
         public ClipSettings(bool featuredOnly, int maxClipSeconds, int clipAgeDays) {
             FeaturedOnly = featuredOnly;
@@ -208,5 +337,11 @@ public class ClipManager {
             maxClipSeconds = MaxClipSeconds;
             clipAgeDays = ClipAgeDays;
         }
+    }
+
+    private class CachedClipData {
+        public ClipData Clip { get; set; }
+        public int SearchFrequency { get; set; }
+        public DateTime LastAccessed { get; set; }
     }
 }

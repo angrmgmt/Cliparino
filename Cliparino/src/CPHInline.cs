@@ -20,11 +20,14 @@
 #region
 
 using System;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Streamer.bot.Common.Events;
 using Streamer.bot.Plugin.Interface;
 using Streamer.bot.Plugin.Interface.Enums;
 using Streamer.bot.Plugin.Interface.Model;
+using Twitch.Common.Models.Api;
 
 #endregion
 
@@ -37,8 +40,46 @@ using Streamer.bot.Plugin.Interface.Model;
 public class CPHInline : CPHInlineBase {
     private static HttpManager _httpManager;
     public static Dimensions Dimensions;
+
+    private readonly string[] _wordsOfAffirmation = {
+        "yes",
+        "yep",
+        "yeah",
+        "yar",
+        "go ahead",
+        "yup",
+        "sure",
+        "fine",
+        "okay",
+        "ok",
+        "play it",
+        "alright",
+        "alrighty",
+        "alrighties",
+        "seemsgood",
+        "thumbsup"
+    };
+
+    private readonly string[] _wordsOfDenial = {
+        "no",
+        "nay",
+        "nope",
+        "nah",
+        "nar",
+        "naw",
+        "not sure",
+        "not okay",
+        "not ok",
+        "okayn't",
+        "yesn't",
+        "not alright",
+        "thumbsdown"
+    };
+
     private ClipManager _clipManager;
     private bool _initialized;
+
+    private bool _isModApproved;
     private CPHLogger _logger;
     private bool _loggingEnabled;
     private ObsSceneManager _obsSceneManager;
@@ -139,34 +180,216 @@ public class CPHInline : CPHInlineBase {
         }
     }
 
-    private async Task<bool> HandleWatchCommand(string url) {
+    private async Task<bool> HandleWatchCommand(string input) {
         _logger.Log(LogLevel.Debug, "Handling !watch command.");
 
         try {
-            var clipUrl = string.IsNullOrWhiteSpace(url) ? _clipManager.GetLastClipUrl() : url;
+            _logger.Log(LogLevel.Debug, $"Determining type of Input 0: {input}...");
 
-            if (string.IsNullOrEmpty(clipUrl)) {
-                _logger.Log(LogLevel.Warn, "No valid clip URL provided.");
+            if (IsInvalidInput(input)) {
+                _logger.Log(LogLevel.Debug, "Input 0 is invalid. Falling back to last clip...");
+
+                return await ProcessLastClipFallback();
+            }
+
+            _logger.Log(LogLevel.Debug, "Input 0 is a valid URL, username, or search term. Checking for URL...");
+
+            if (IsValidUrl(input)) {
+                _logger.Log(LogLevel.Debug, "Input 0 is a valid URL. Processing...");
+
+                return await ProcessClipByUrl(input);
+            }
+
+            _logger.Log(LogLevel.Debug, "Input 0 is not a valid URL. Checking username...");
+
+            var (broadcasterId, searchTerm) = ResolveBroadcasterAndSearchTerm(input);
+
+            if (string.IsNullOrEmpty(broadcasterId)) {
+                CPH.SendMessage("Unable to resolve channel by username. Please try again with a valid username or URL.");
 
                 return false;
             }
 
-            var clipData = await _clipManager.GetClipDataAsync(clipUrl);
+            _logger.Log(LogLevel.Debug, "Input reconciled. Searching for clips...");
 
-            _httpManager.HostClip(clipData);
-
-            await _obsSceneManager.PlayClip(clipData);
-            await Task.Delay((int)clipData.Duration * 1000 + 3000);
-            await HandleStopCommand();
-
-            _clipManager.SetLastClipUrl(clipUrl);
-
-            return true;
+            return await SearchAndPlayClip(broadcasterId, searchTerm);
         } catch (Exception ex) {
             _logger.Log(LogLevel.Error, "Error occurred while handling !watch command.", ex);
 
             return false;
         }
+    }
+
+    private static bool IsValidUrl(string input) {
+        // Simple validation for well-formed URLs; adjust as needed for your specific project
+        return Uri.IsWellFormedUriString(input, UriKind.Absolute) && input.Contains("twitch.tv");
+    }
+
+    private bool IsInvalidInput(string input) {
+        if (!string.IsNullOrWhiteSpace(input) && !input.Equals("about:blank")) return false;
+
+        _logger.Log(LogLevel.Warn, "No valid clip URL or search term provided.");
+
+        return true;
+    }
+
+    private async Task<bool> ProcessLastClipFallback() {
+        var lastClipUrl = _clipManager.GetLastClipUrl();
+
+        if (!string.IsNullOrWhiteSpace(lastClipUrl)) {
+            _logger.Log(LogLevel.Debug, "Last clip URL found. Processing...");
+
+            return await ProcessClipByUrl(lastClipUrl);
+        }
+
+        _logger.Log(LogLevel.Error, "No clip URL or previous clip available.");
+
+        return false;
+    }
+
+    private async Task<bool> ProcessClipByUrl(string url) {
+        _logger.Log(LogLevel.Debug, "Valid URL received. Accessing clip data...");
+
+        try {
+            var clipData = await _clipManager.GetClipDataAsync(url);
+
+            if (clipData != null) {
+                _logger.Log(LogLevel.Debug, "Clip data retrieved successfully.");
+
+                return await PlayClipAsync(clipData);
+            }
+
+            _logger.Log(LogLevel.Warn, "Clip data could not be retrieved.");
+            CPH.SendMessage("Unable to retrieve clip data. Please try again with a valid URL.");
+
+            return false;
+        } catch (Exception ex) {
+            _logger.Log(LogLevel.Error, "Error occurred while processing clip by URL.", ex);
+
+            return false;
+        }
+    }
+
+    private (string broadcasterId, string searchTerm) ResolveBroadcasterAndSearchTerm(string input) {
+        input = input.Trim();
+
+        var inputArgs = input.Split(new[] { ' ' }, 2, StringSplitOptions.RemoveEmptyEntries);
+        var username = inputArgs[0].StartsWith("@") ? inputArgs[0].Substring(1) : null;
+        var searchTerm = inputArgs.Length > 1
+                             ? inputArgs[1]
+                             : username == null
+                                 ? inputArgs[0]
+                                 : null;
+
+        if (string.IsNullOrEmpty(username)) {
+            var broadcaster = CPH.TwitchGetBroadcaster();
+
+            _logger.Log(LogLevel.Debug, $"Using current broadcaster: {broadcaster.UserName}");
+
+            return (broadcaster.UserId, searchTerm);
+        }
+
+        var userInfo = CPH.TwitchGetExtendedUserInfoByLogin(username);
+
+        if (userInfo == null) {
+            _logger.Log(LogLevel.Warn, $"Could not resolve username: {username}");
+
+            return (null, null);
+        }
+
+        _logger.Log(LogLevel.Debug, $"Resolved Broadcaster ID: {userInfo.UserId} for username: {username}");
+
+        return (userInfo.UserId, searchTerm);
+    }
+
+    private async Task<bool> SearchAndPlayClip(string broadcasterId, string searchInput) {
+        var cachedClip = ClipManager.GetFromCache(searchInput);
+        ClipData bestClip;
+
+        if (cachedClip != null) {
+            _logger.Log(LogLevel.Debug, "Found cached clip.");
+
+            bestClip = cachedClip;
+        } else {
+            _logger.Log(LogLevel.Debug, "No cached clip found. Searching for clip...");
+            bestClip = await _clipManager.SearchClipsWithThresholdAsync(broadcasterId, searchInput);
+
+            if (bestClip == null) {
+                CPH.SendMessage("No matching clip was found. Please refine your search.");
+
+                return false;
+            }
+        }
+
+        await RequestClipApproval(bestClip);
+
+        if (_isModApproved) return await PlayClipAsync(bestClip);
+
+        return _isModApproved;
+    }
+
+    private async Task<bool> PlayClipAsync(ClipData clipData) {
+        _httpManager.HostClip(clipData);
+
+        await _obsSceneManager.PlayClipAsync(clipData);
+        await Task.Delay((int)clipData.Duration * 1000 + 3000);
+        await HandleStopCommand();
+
+        _clipManager.SetLastClipUrl(clipData.Url);
+
+        return true;
+    }
+
+    private async Task RequestClipApproval(ClipData clip) {
+        CPH.TwitchReplyToMessage($"Did you mean this clip? {clip.Url}", GetArgument(CPH, "messageId", ""));
+        CPH.SendMessage("I'll wait a minute for a mod to approve or deny this clip, starting now.");
+        CPH.EnableAction("Mod Approval");
+
+        var cancellationTokenSource = new CancellationTokenSource();
+        var token = cancellationTokenSource.Token;
+
+        try {
+            await WaitForApproval(token);
+
+            CPH.SendMessage(!_isModApproved
+                                ? "Time's up! The clip wasn't approved, maybe next time!"
+                                : "The clip has been approved!");
+        } catch (TaskCanceledException) {
+            _logger.Log(LogLevel.Debug, "Approval task canceled.");
+        } finally {
+            cancellationTokenSource.Dispose();
+            CPH.DisableAction("Mod Approval");
+        }
+    }
+
+    private async Task WaitForApproval(CancellationToken token) {
+        var approvalTask = Task.Run(async () => {
+                                        while (!_isModApproved && !token.IsCancellationRequested)
+                                            await Task.Delay(500, token);
+                                    },
+                                    token);
+
+        var timeoutTask = Task.Delay(60000, token);
+
+        await Task.WhenAny(approvalTask, timeoutTask);
+
+        if (!token.IsCancellationRequested) token.ThrowIfCancellationRequested();
+    }
+
+    // ReSharper disable once UnusedMember.Global
+    public bool IsModApproved() {
+        var isMod = GetArgument(CPH, "isModerator", false);
+
+        if (!isMod) return _isModApproved;
+
+        var message = GetArgument(CPH, "message", "");
+
+        if (_wordsOfDenial.Any(word => message.IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0))
+            _isModApproved = false;
+        else if (_wordsOfAffirmation.Any(word => message.IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0))
+            _isModApproved = true;
+
+        return _isModApproved;
     }
 
     private async Task<bool> HandleShoutoutCommand(string username) {
@@ -188,12 +411,12 @@ public class CPHInline : CPHInlineBase {
                 return false;
             }
 
-            var message = GetArgument(CPH, "message", "");
+            var message = GetArgument(CPH, "soMessage", "");
 
             _twitchApiManager.SendShoutout(username, message);
             _httpManager.HostClip(clipData);
 
-            await _obsSceneManager.PlayClip(clipData);
+            await _obsSceneManager.PlayClipAsync(clipData);
             await Task.Delay((int)clipData.Duration * 1000 + 3000);
             await HandleStopCommand();
 
@@ -226,7 +449,7 @@ public class CPHInline : CPHInlineBase {
 
                 _httpManager.HostClip(clipData);
 
-                await _obsSceneManager.PlayClip(clipData);
+                await _obsSceneManager.PlayClipAsync(clipData);
                 await Task.Delay((int)clipData.Duration * 1000 + 3000);
                 await HandleStopCommand();
 
@@ -281,12 +504,38 @@ public class CPHInline : CPHInlineBase {
         }
     }
 
-    private static T GetArgument<T>(IInlineInvokeProxy cph, string argName, T defaultValue = default) {
+    public static T GetArgument<T>(IInlineInvokeProxy cph, string argName, T defaultValue = default) {
         return cph.TryGetArg(argName, out T value) ? value : defaultValue;
     }
 
     public static HttpManager GetHttpManager() {
         return _httpManager;
+    }
+
+    // Levenshtein Distance Calculation
+    public static int CalculateLevenshteinDistance(string source, string target) {
+        var m = source.Length;
+        var n = target.Length;
+        var matrix = new int[m + 1, n + 1];
+
+        for (var i = 0; i <= m; i++) matrix[i, 0] = i;
+        for (var j = 0; j <= n; j++) matrix[0, j] = j;
+
+        for (var i = 1; i <= m; i++) {
+            for (var j = 1; j <= n; j++) {
+                var cost = target[j - 1] == source[i - 1] ? 0 : 1;
+
+                matrix[i, j] = Math.Min(Math.Min(matrix[i - 1, j] + 1, matrix[i, j - 1] + 1),
+                                        matrix[i - 1, j - 1] + cost);
+            }
+        }
+
+        return matrix[m, n];
+    }
+
+    // ReSharper disable once UnusedMember.Global
+    public bool CleanCache() {
+        return _clipManager.CleanCache();
     }
 }
 

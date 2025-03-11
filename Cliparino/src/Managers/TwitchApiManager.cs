@@ -68,6 +68,47 @@ public class TwitchApiManager {
         _logger.Log(LogLevel.Info, $"Shoutout sent for {username}.");
     }
 
+    public async Task<ClipManager.ClipsResponse> FetchClipsAsync(string broadcasterId, string cursor = null) {
+        var url = BuildClipsApiUrl(broadcasterId, cursor);
+
+        _logger.Log(LogLevel.Debug, $"Calling Twitch API with URL: {url}");
+
+
+        var request = new HttpRequestMessage(HttpMethod.Get, url);
+
+        try {
+            request.Headers.Add("Client-Id", $"{_oauthInfo.TwitchClientId}");
+            request.Headers.Add("Authorization", $"Bearer {_oauthInfo.TwitchOAuthToken}");
+
+            var response = await HTTPManager.Client.SendAsync(request);
+
+            response.EnsureSuccessStatusCode();
+
+            var responseBody = await response.Content.ReadAsStringAsync();
+
+            _logger.Log(LogLevel.Debug, $"API Response: {responseBody}");
+
+            return JsonConvert.DeserializeObject<ClipManager.ClipsResponse>(responseBody);
+        } catch (Exception ex) {
+            _logger.Log(LogLevel.Error, "Error occurred while fetching clips.", ex);
+
+            return null;
+        } finally {
+            _logger.Log(LogLevel.Info, "Finished fetching clips.");
+        }
+    }
+
+    private static string BuildClipsApiUrl(string broadcasterId, string cursor = "", int first = 20) {
+        var url = $"https://api.twitch.tv/helix/clips?broadcaster_id={broadcasterId}";
+
+        if (!string.IsNullOrWhiteSpace(cursor))
+            url += $"&after={cursor}";
+        else
+            url += $"&first={first}";
+
+        return url;
+    }
+
     private static string FormatShoutoutMessage(TwitchUserInfoEx user, string message) {
         return message.Replace("[[userName]]", user.UserName).Replace("[[userGame]]", user.Game);
     }

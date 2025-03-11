@@ -47,7 +47,7 @@ public class ObsSceneManager {
 
     private static Dimensions Dimensions => CPHInline.Dimensions;
 
-    public async Task PlayClip(ClipData clipData) {
+    public async Task PlayClipAsync(ClipData clipData) {
         if (clipData == null) {
             _logger.Log(LogLevel.Error, "No clip data provided.");
 
