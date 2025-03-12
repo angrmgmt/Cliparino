@@ -31,6 +31,10 @@ using Twitch.Common.Models.Api;
 
 #endregion
 
+/// <summary>
+///     A manager for interacting with Twitch API functionalities such as sending shoutouts, fetching
+///     clips, games, and handling OAuth information.
+/// </summary>
 public class TwitchApiManager {
     private readonly IInlineInvokeProxy _cph;
     private readonly CPHLogger _logger;
@@ -42,8 +46,24 @@ public class TwitchApiManager {
         _oauthInfo = new OAuthInfo(cph.TwitchClientId, cph.TwitchOAuthToken);
     }
 
+    /// <summary>
+    ///     A dynamic, live reference to the <see cref="HttpManager" /> instance that is currently in use
+    ///     in Cliparino.
+    /// </summary>
     private static HttpManager HTTPManager => CPHInline.GetHttpManager();
 
+    /// <summary>
+    ///     Sends a shoutout message to a specified Twitch user.
+    /// </summary>
+    /// <param name="username">
+    ///     The Twitch username of the user to give a shoutout to.
+    /// </param>
+    /// <param name="message">
+    ///     An optional custom message for the shoutout. Use placeholders for user info.
+    /// </param>
+    /// <remarks>
+    ///     If no <paramref name="message" /> is provided, a default shoutout message will be used.
+    /// </remarks>
     public void SendShoutout(string username, string message) {
         if (string.IsNullOrWhiteSpace(username)) {
             _logger.Log(LogLevel.Error, "No username provided for shoutout.");
@@ -68,6 +88,19 @@ public class TwitchApiManager {
         _logger.Log(LogLevel.Info, $"Shoutout sent for {username}.");
     }
 
+    /// <summary>
+    ///     Fetches Twitch clips based on a broadcaster ID and optional pagination cursor.
+    /// </summary>
+    /// <param name="broadcasterId">
+    ///     The ID of the Twitch broadcaster whose clips are being fetched.
+    /// </param>
+    /// <param name="cursor">
+    ///     Optional pagination cursor for retrieving the next set of clips.
+    /// </param>
+    /// <returns>
+    ///     A task that represents the asynchronous operation. The task result contains a
+    ///     <see cref="ClipManager.ClipsResponse" /> object, or <c>null</c> if an error occurred.
+    /// </returns>
     public async Task<ClipManager.ClipsResponse> FetchClipsAsync(string broadcasterId, string cursor = null) {
         var url = BuildClipsApiUrl(broadcasterId, cursor);
 
@@ -98,6 +131,21 @@ public class TwitchApiManager {
         }
     }
 
+    /// <summary>
+    ///     Builds a Twitch API URL for fetching clips based on broadcaster ID and pagination cursor.
+    /// </summary>
+    /// <param name="broadcasterId">
+    ///     The ID of the broadcaster.
+    /// </param>
+    /// <param name="cursor">
+    ///     An optional pagination cursor.
+    /// </param>
+    /// <param name="first">
+    ///     The maximum number of clips to fetch (default is 20).
+    /// </param>
+    /// <returns>
+    ///     A complete URL string for the Twitch Clips API.
+    /// </returns>
     private static string BuildClipsApiUrl(string broadcasterId, string cursor = "", int first = 20) {
         var url = $"https://api.twitch.tv/helix/clips?broadcaster_id={broadcasterId}";
 
@@ -109,18 +157,69 @@ public class TwitchApiManager {
         return url;
     }
 
+    /// <summary>
+    ///     Formats a shoutout message using placeholders for the Twitch user data.
+    /// </summary>
+    /// <param name="user">
+    ///     The Twitch user information.
+    /// </param>
+    /// <param name="message">
+    ///     The message template containing placeholders.
+    /// </param>
+    /// <returns>
+    ///     A formatted shoutout message.
+    /// </returns>
     private static string FormatShoutoutMessage(TwitchUserInfoEx user, string message) {
         return message.Replace("[[userName]]", user.UserName).Replace("[[userGame]]", user.Game);
     }
 
+    /// <summary>
+    ///     Fetches information about a Twitch clip by its ID.
+    /// </summary>
+    /// <param name="clipId">
+    ///     The ID of the clip to fetch.
+    /// </param>
+    /// <returns>
+    ///     A task that represents the asynchronous operation. `The task result contains a
+    ///     <see cref="ClipData" /> object with information about the clip.
+    /// </returns>
     public async Task<ClipData> FetchClipById(string clipId) {
         return await FetchDataAsync<ClipData>($"clips?id={clipId}");
     }
 
+    /// <summary>
+    ///     Fetches information about a Twitch game by its ID.
+    /// </summary>
+    /// <param name="gameId">
+    ///     The ID of the game to fetch.
+    /// </param>
+    /// <returns>
+    ///     A task that represents the asynchronous operation. The task result contains a
+    ///     <see cref="GameData" /> object with information about the game.
+    /// </returns>
     public async Task<GameData> FetchGameById(string gameId) {
         return await FetchDataAsync<GameData>($"games?id={gameId}");
     }
 
+    /// <summary>
+    ///     Fetches generic data from a specified Twitch API endpoint.
+    /// </summary>
+    /// <typeparam name="T">
+    ///     The expected type of the response data.
+    /// </typeparam>
+    /// <param name="endpoint">
+    ///     The API endpoint to fetch data from.
+    /// </param>
+    /// <returns>
+    ///     A task that represents the asynchronous operation. The task result contains an object of type
+    ///     <typeparamref name="T" />, or the default value if an error occurred.
+    /// </returns>
+    /// <exception cref="ArgumentNullException">
+    ///     Thrown if <paramref name="endpoint" /> is null or empty.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    ///     Thrown if Twitch OAuth information is invalid.
+    /// </exception>
     private async Task<T> FetchDataAsync<T>(string endpoint) {
         ValidateEndpoint(endpoint);
         ValidateOAuthInfo();
@@ -149,34 +248,80 @@ public class TwitchApiManager {
         }
     }
 
+    /// <summary>
+    ///     Validates that the given API endpoint is not null or empty.
+    /// </summary>
+    /// <param name="endpoint">
+    ///     The API endpoint to validate.
+    /// </param>
+    /// <exception cref="ArgumentNullException">
+    ///     Thrown if the <paramref name="endpoint" /> is null or empty.
+    /// </exception>
     private static void ValidateEndpoint(string endpoint) {
         if (string.IsNullOrWhiteSpace(endpoint))
             throw new ArgumentNullException(nameof(endpoint), "Endpoint cannot be null or empty.");
     }
 
+    /// <summary>
+    ///     Validates that the Twitch OAuth information (Client ID and OAuth Token) is valid.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    ///     Thrown if the Twitch Validates that the TwiOAuth information is missing or invalid.
+    /// </exception>
     private void ValidateOAuthInfo() {
         if (string.IsNullOrWhiteSpace(_oauthInfo.TwitchClientId)
             || string.IsNullOrWhiteSpace(_oauthInfo.TwitchOAuthToken))
             throw new InvalidOperationException("Twitch OAuth information is missing or invalid.");
     }
 
+    /// <summary>
+    ///     Logs the validity of HTTP manager components, including the HTTP manager, client, and base URI.
+    /// </summary>
+    /// <remarks>
+    ///     Logs messages indicating the validity of various HTTP manager components at the debug level.
+    /// </remarks>
     private void LogHttpManagerValidity() {
-        var httpManValid = HTTPManager != null;
-        var httpClientValid = HTTPManager?.Client != null;
-        var baseUriValid = HTTPManager?.Client?.BaseAddress != null;
-        var validConditionsMet = httpManValid && httpClientValid && baseUriValid;
-
-        _logger.Log(LogLevel.Debug, $"Checking validity of HTTP manager components... {validConditionsMet}");
-        _logger.Log(LogLevel.Debug,
-                    $"HTTP Manager: {httpManValid}, HTTP Client: {httpClientValid}, Base URI: {baseUriValid}");
+        /* Implementation */
     }
 
+    /// <summary>
+    ///     Constructs a complete URL by combining the base address and the provided endpoint.
+    /// </summary>
+    /// <param name="endpoint">
+    ///     The endpoint to append to the base address.
+    /// </param>
+    /// <returns>
+    ///     A <see cref="string" /> representing the fully constructed URL.
+    /// </returns>
+    /// <remarks>
+    ///     If the base address is null, a default value of "https://www.google.com" is used.
+    /// </remarks>
     private string GetCompleteUrl(string endpoint) {
         var baseAddress = HTTPManager?.Client?.BaseAddress?.ToString() ?? "https://www.google.com";
 
         return new Uri(new Uri(baseAddress), endpoint).ToString();
     }
 
+    /// <summary>
+    ///     Deserializes the content of an API response into a specific type.
+    /// </summary>
+    /// <typeparam name="T">
+    ///     The type to deserialize the API response content into.
+    /// </typeparam>
+    /// <param name="content">
+    ///     The JSON content returned from the API response.
+    /// </param>
+    /// <param name="endpoint">
+    ///     The endpoint associated with the API response.
+    /// </param>
+    /// <returns>
+    ///     The deserialized object of type <typeparamref name="T" />. If no data is returned, the default
+    ///     value of <typeparamref name="T" /> is returned.
+    /// </returns>
+    /// <remarks>
+    ///     Logs the result of the deserialization process, with an error message logged if no data is
+    ///     available.
+    /// </remarks>
     private T DeserializeApiResponse<T>(string content, string endpoint) {
         var apiResponse = JsonConvert.DeserializeObject<TwitchApiResponse<T>>(content);
 
@@ -191,6 +336,13 @@ public class TwitchApiManager {
         return default;
     }
 
+    /// <summary>
+    ///     Configures HTTP request headers for the HTTP client.
+    /// </summary>
+    /// <remarks>
+    ///     Clears any existing headers and sets the "Client-ID" and "Authorization" headers based on the
+    ///     OAuth credentials.
+    /// </remarks>
     private void ConfigureHttpRequestHeaders() {
         var client = HTTPManager.Client;
 
@@ -199,6 +351,22 @@ public class TwitchApiManager {
         client.DefaultRequestHeaders.Add("Authorization", $"Bearer {_oauthInfo.TwitchOAuthToken}");
     }
 
+    /// <summary>
+    ///     Sends an asynchronous HTTP GET request to the specified endpoint.
+    /// </summary>
+    /// <param name="endpoint">
+    ///     The endpoint to which the HTTP GET request will be made.
+    /// </param>
+    /// <returns>
+    ///     A <see cref="Task{TResult}" /> representing the response content as a <see cref="string" />.
+    /// </returns>
+    /// <exception cref="HttpRequestException">
+    ///     Thrown when the request fails with an unsuccessful status code.
+    /// </exception>
+    /// <remarks>
+    ///     Logs detailed information about the headers, response, and errors encountered during the
+    ///     request.
+    /// </remarks>
     private async Task<string> SendHttpRequestAsync(string endpoint) {
         try {
             ConfigureHttpRequestHeaders();
@@ -231,6 +399,9 @@ public class TwitchApiManager {
         }
     }
 
+    /// <summary>
+    ///     Represents the OAuth information required for authentication with the Twitch API.
+    /// </summary>
     private class OAuthInfo {
         public OAuthInfo(string twitchClientId, string twitchOAuthToken) {
             TwitchClientId = twitchClientId
@@ -240,13 +411,36 @@ public class TwitchApiManager {
                                                                   "OAuth token cannot be null.");
         }
 
+        /// <summary>
+        ///     Gets the Twitch Client ID.
+        /// </summary>
         public string TwitchClientId { get; }
+
+        /// <summary>
+        ///     Gets the Twitch OAuth token.
+        /// </summary>
         public string TwitchOAuthToken { get; }
 
+        /// <summary>
+        ///     Returns a string representation of the OAuth information, with the OAuth token obfuscated.
+        /// </summary>
+        /// <returns>
+        ///     A <see cref="string" /> representing the obfuscated OAuth information.
+        /// </returns>
         public override string ToString() {
             return $"Client ID: {TwitchClientId}, OAuth Token: {ObfuscateString(TwitchOAuthToken)}";
         }
 
+        /// <summary>
+        ///     Obfuscates a given string for security purposes.
+        /// </summary>
+        /// <param name="input">
+        ///     The string to obfuscate.
+        /// </param>
+        /// <returns>
+        ///     A <see cref="string" /> with the middle portion obfuscated or empty if the input is null or
+        ///     empty.
+        /// </returns>
         public static string ObfuscateString(string input) {
             if (string.IsNullOrEmpty(input)) return string.Empty;
 
@@ -262,17 +456,43 @@ public class TwitchApiManager {
         }
     }
 
+    /// <summary>
+    ///     Represents a response from the Twitch API with a data object of type <typeparamref name="T" />.
+    /// </summary>
+    /// <typeparam name="T">
+    ///     The type of object contained in the data property of the response.
+    /// </typeparam>
     public class TwitchApiResponse<T> {
         public TwitchApiResponse(T[] data) {
             Data = data ?? Array.Empty<T>();
         }
 
+        /// <summary>
+        ///     Gets the data retrieved from the Twitch API response.
+        /// </summary>
         public T[] Data { get; }
     }
 
+    /// <summary>
+    ///     Represents a game data object retrieved from the Twitch API.
+    /// </summary>
     public class GameData {
-        [JsonProperty("box_art_url")] public string BoxArtUrl { get; set; }
-        [JsonProperty("id")] public string Id { get; set; }
-        [JsonProperty("name")] public string Name { get; set; }
+        /// <summary>
+        ///     Gets or sets the URL of the game's box art.
+        /// </summary>
+        [JsonProperty("box_art_url")]
+        public string BoxArtUrl { get; set; }
+
+        /// <summary>
+        ///     Gets or sets the ID of the game.
+        /// </summary>
+        [JsonProperty("id")]
+        public string Id { get; set; }
+
+        /// <summary>
+        ///     Gets or sets the name of the game.
+        /// </summary>
+        [JsonProperty("name")]
+        public string Name { get; set; }
     }
 }

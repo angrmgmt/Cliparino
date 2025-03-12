@@ -31,12 +31,15 @@ using Twitch.Common.Models.Api;
 
 #endregion
 
+/// <summary>
+///     Manages OBS scenes and sources for Cliparino, a clip player for Twitch.tv, ensuring seamless
+///     clip playback integration with OBS.
+/// </summary>
 public class ObsSceneManager {
     private const string CliparinoSourceName = "Cliparino";
     private const string PlayerSourceName = "Player";
     private const string ActiveUrl = "http://localhost:8080/";
     private const string InactiveUrl = "about:blank";
-
     private readonly IInlineInvokeProxy _cph;
     private readonly CPHLogger _logger;
 
@@ -45,8 +48,24 @@ public class ObsSceneManager {
         _logger = logger;
     }
 
+    /// <summary>
+    ///     Gets the dimensions of the display from the Streamer.bot API.
+    /// </summary>
     private static Dimensions Dimensions => CPHInline.Dimensions;
 
+    /// <summary>
+    ///     Plays a Twitch.tv clip using the Cliparino player in the current OBS scene.
+    /// </summary>
+    /// <param name="clipData">
+    ///     The data of the clip to be played, including its URL and title.
+    /// </param>
+    /// <returns>
+    ///     A task that represents the asynchronous operation.
+    /// </returns>
+    /// <remarks>
+    ///     If the clip data or the current OBS scene is not available, an error is logged and no action is
+    ///     taken.
+    /// </remarks>
     public async Task PlayClipAsync(ClipData clipData) {
         if (clipData == null) {
             _logger.Log(LogLevel.Error, "No clip data provided.");
@@ -70,6 +89,12 @@ public class ObsSceneManager {
         await LogPlayerState();
     }
 
+    /// <summary>
+    ///     Stops the currently playing clip and hides the Cliparino player in OBS.
+    /// </summary>
+    /// <returns>
+    ///     A task that represents the asynchronous operation.
+    /// </returns>
     public async Task StopClip() {
         _logger.Log(LogLevel.Info, "Stopping clip playback.");
 
@@ -79,6 +104,12 @@ public class ObsSceneManager {
         HideCliparino(CurrentScene());
     }
 
+    /// <summary>
+    ///     Logs the current state of the OBS browser source used for Cliparino playback.
+    /// </summary>
+    /// <returns>
+    ///     A task that represents the delay operation.
+    /// </returns>
     private async Task LogPlayerState() {
         await Task.Delay(1000);
 
@@ -89,6 +120,12 @@ public class ObsSceneManager {
                     $"Browser Source '{PlayerSourceName}' details - URL: {browserSourceUrl}, Visible: {isBrowserVisible}");
     }
 
+    /// <summary>
+    ///     Retrieves the URL of the Cliparino player from the OBS settings.
+    /// </summary>
+    /// <returns>
+    ///     The URL string of the player if found; otherwise, a message indicating no URL was found.
+    /// </returns>
     private string GetPlayerUrl() {
         var playerUrl = GetPlayerSettings()?["url"]?.ToString();
 
@@ -97,6 +134,12 @@ public class ObsSceneManager {
         return playerUrl ?? "Error: No URL found.";
     }
 
+    /// <summary>
+    ///     Retrieves the settings of the Cliparino player source in OBS.
+    /// </summary>
+    /// <returns>
+    ///     A JSON object representing the player settings.
+    /// </returns>
     private JObject GetPlayerSettings() {
         var payload = new Payload {
             RequestType = "GetInputSettings", RequestData = new { inputName = PlayerSourceName }
@@ -107,6 +150,12 @@ public class ObsSceneManager {
                                                                           .SerializeObject(payload.RequestData)));
     }
 
+    /// <summary>
+    ///     Retrieves the name of the currently active OBS scene.
+    /// </summary>
+    /// <returns>
+    ///     The name of the current scene, or null if it could not be determined.
+    /// </returns>
     private string CurrentScene() {
         var currentScene = _cph.ObsGetCurrentScene();
 
@@ -115,6 +164,12 @@ public class ObsSceneManager {
         return currentScene;
     }
 
+    /// <summary>
+    ///     Ensures the Cliparino sources are visible in the specified OBS scene.
+    /// </summary>
+    /// <param name="scene">
+    ///     The name of the scene where the Cliparino source should be shown.
+    /// </param>
     private void ShowCliparino(string scene) {
         try {
             if (!_cph.ObsIsSourceVisible(scene, CliparinoSourceName))
@@ -127,6 +182,12 @@ public class ObsSceneManager {
         }
     }
 
+    /// <summary>
+    ///     Hides the Cliparino sources in the specified OBS scene.
+    /// </summary>
+    /// <param name="scene">
+    ///     The name of the scene where the Cliparino source should be hidden.
+    /// </param>
     private void HideCliparino(string scene) {
         try {
             if (_cph.ObsIsSourceVisible(scene, CliparinoSourceName))
@@ -139,6 +200,15 @@ public class ObsSceneManager {
         }
     }
 
+    /// <summary>
+    ///     Modifies the OBS browser source to use the specified URL.
+    /// </summary>
+    /// <param name="url">
+    ///     The URL to set for the OBS browser source.
+    /// </param>
+    /// <returns>
+    ///     A task that represents the asynchronous operation.
+    /// </returns>
     private async Task SetBrowserSourceAsync(string url) {
         try {
             _logger.Log(LogLevel.Debug, $"Setting Player URL to '{url}'.");
@@ -148,6 +218,9 @@ public class ObsSceneManager {
         }
     }
 
+    /// <summary>
+    ///     Configures Cliparino and its player source in OBS, adding them as needed.
+    /// </summary>
     private void SetUpCliparino() {
         try {
             if (!CliparinoExists()) {
@@ -171,6 +244,18 @@ public class ObsSceneManager {
         }
     }
 
+    /// <summary>
+    ///     Checks if a specific source exists in a specified scene.
+    /// </summary>
+    /// <param name="scene">
+    ///     The name of the scene to check.
+    /// </param>
+    /// <param name="source">
+    ///     The name of the source to look for.
+    /// </param>
+    /// <returns>
+    ///     True if the source exists in the scene, otherwise false.
+    /// </returns>
     private bool SourceIsInScene(string scene, string source) {
         var response = GetSceneItemId(scene, source);
         var itemId = response is string ? -1 : response.sceneItemId;
@@ -178,14 +263,38 @@ public class ObsSceneManager {
         return itemId > 0;
     }
 
+    /// <summary>
+    ///     Determines if the player source exists in the Cliparino scene.
+    /// </summary>
+    /// <returns>
+    ///     True if the player source exists, otherwise false.
+    /// </returns>
     private bool PlayerExists() {
         return SourceIsInScene(CliparinoSourceName, PlayerSourceName);
     }
 
+    /// <summary>
+    ///     Checks if the Cliparino source exists in the currently active scene.
+    /// </summary>
+    /// <returns>
+    ///     True if the Cliparino source exists in the current scene, otherwise false.
+    /// </returns>
     private bool CliparinoInCurrentScene() {
         return SourceIsInScene(CurrentScene(), CliparinoSourceName);
     }
 
+    /// <summary>
+    ///     Retrieves the scene item ID for a given source in a specified scene.
+    /// </summary>
+    /// <param name="sceneName">
+    ///     The name of the scene.
+    /// </param>
+    /// <param name="sourceName">
+    ///     The name of the source in the scene.
+    /// </param>
+    /// <returns>
+    ///     A dynamic object containing information about the scene item.
+    /// </returns>
     private dynamic GetSceneItemId(string sceneName, string sourceName) {
         var payload = new Payload {
             RequestType = "GetSceneItemId", RequestData = new { sceneName, sourceName, searchOffset = 0 }
@@ -198,6 +307,9 @@ public class ObsSceneManager {
         return response;
     }
 
+    /// <summary>
+    ///     Adds the Cliparino source to the currently active scene in OBS.
+    /// </summary>
     private void AddCliparinoToScene() {
         var payload = new Payload {
             RequestType = "CreateSceneItem",
@@ -212,6 +324,9 @@ public class ObsSceneManager {
             _logger.Log(LogLevel.Error, $"Failed to add Cliparino to scene '{CurrentScene()}'.");
     }
 
+    /// <summary>
+    ///     Adds the Player source to the Cliparino scene with proper settings and dimensions.
+    /// </summary>
     private void AddPlayerToCliparino() {
         try {
             if (Dimensions == null) {
@@ -260,6 +375,9 @@ public class ObsSceneManager {
         }
     }
 
+    /// <summary>
+    ///     Creates the Cliparino scene in OBS.
+    /// </summary>
     private void CreateCliparinoScene() {
         try {
             var payload = new Payload {
@@ -278,6 +396,12 @@ public class ObsSceneManager {
         }
     }
 
+    /// <summary>
+    ///     Checks if the Cliparino scene exists in OBS.
+    /// </summary>
+    /// <returns>
+    ///     True if the Cliparino scene exists, otherwise false.
+    /// </returns>
     private bool CliparinoExists() {
         try {
             return SceneExists(CliparinoSourceName);
@@ -288,6 +412,15 @@ public class ObsSceneManager {
         }
     }
 
+    /// <summary>
+    ///     Checks if a scene with the given name exists in OBS.
+    /// </summary>
+    /// <param name="sceneName">
+    ///     The name of the scene to check.
+    /// </param>
+    /// <returns>
+    ///     True if the scene exists, otherwise false.
+    /// </returns>
     private bool SceneExists(string sceneName) {
         try {
             var sceneExists = false;
@@ -316,6 +449,10 @@ public class ObsSceneManager {
         }
     }
 
+    /// <summary>
+    ///     Configures audio settings for the Player source in OBS, including the monitoring type, volume,
+    ///     and filters.
+    /// </summary>
     private void ConfigureAudioSettings() {
         if (!PlayerExists()) {
             _logger.Log(LogLevel.Warn, "Cannot configure audio settings because Player source doesn't exist.");
@@ -337,7 +474,6 @@ public class ObsSceneManager {
             var inputVolumePayload = GenerateSetInputVolumePayload(-6);
             var inputVolumeResponse = _cph.ObsSendRaw(inputVolumePayload.RequestType,
                                                       JsonConvert.SerializeObject(inputVolumePayload.RequestData));
-
 
             if (string.IsNullOrEmpty(inputVolumeResponse) || inputVolumeResponse != "{}") {
                 _logger.Log(LogLevel.Warn, "Failed to set volume for the Player source.");
@@ -372,6 +508,12 @@ public class ObsSceneManager {
         }
     }
 
+    /// <summary>
+    ///     Generates a payload for creating a compressor filter.
+    /// </summary>
+    /// <returns>
+    ///     An instance of a payload object for creating a compressor filter.
+    /// </returns>
     private static IPayload GenerateCompressorFilterPayload() {
         return new Payload {
             RequestType = "CreateSourceFilter",
@@ -391,6 +533,15 @@ public class ObsSceneManager {
         };
     }
 
+    /// <summary>
+    ///     Generates a payload for creating a gain filter with a specified gain value.
+    /// </summary>
+    /// <param name="gainValue">
+    ///     The gain value in decibels.
+    /// </param>
+    /// <returns>
+    ///     An instance of a payload object for creating a gain filter.
+    /// </returns>
     private static IPayload GenerateGainFilterPayload(double gainValue) {
         return new Payload {
             RequestType = "CreateSourceFilter",
@@ -403,12 +554,31 @@ public class ObsSceneManager {
         };
     }
 
+    /// <summary>
+    ///     Generates a payload for setting the volume of an input source in OBS.
+    /// </summary>
+    /// <param name="volumeValue">
+    ///     The volume level in decibels.
+    /// </param>
+    /// <returns>
+    ///     An instance of a payload object for setting input volume.
+    /// </returns>
     private static IPayload GenerateSetInputVolumePayload(double volumeValue) {
         return new Payload {
             RequestType = "SetInputVolume", RequestData = new { inputName = "Player", inputVolumeDb = volumeValue }
         };
     }
 
+    /// <summary>
+    ///     Generates a payload for setting the audio monitoring type of the associated input source in
+    ///     OBS.
+    /// </summary>
+    /// <param name="monitorType">
+    ///     The monitor type as a string (e.g., "OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT").
+    /// </param>
+    /// <returns>
+    ///     An instance of a payload object for setting the monitoring type.
+    /// </returns>
     private static IPayload GenerateSetInputAudioMonitorTypePayload(string monitorType) {
         return new Payload {
             RequestType = "SetInputAudioMonitorType", RequestData = new { inputName = "Player", monitorType }

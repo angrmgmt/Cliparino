@@ -33,6 +33,10 @@ using Twitch.Common.Models.Api;
 
 #endregion
 
+/// <summary>
+///     Manages HTTP server and client functionalities required for hosting and handling HTTP
+///     interactions.
+/// </summary>
 public class HttpManager {
     private const int NonceLength = 16;
     private const string ServerUrl = "http://localhost:8080/";
@@ -132,6 +136,16 @@ public class HttpManager {
         Client = new HttpClient { BaseAddress = new Uri(HelixApiUrl) };
     }
 
+    /// <summary>
+    ///     Generates a dictionary containing headers for Cross-Origin Resource Sharing (CORS)
+    ///     configuration.
+    /// </summary>
+    /// <param name="nonce">
+    ///     A unique string used for script security to prevent unauthorized execution of scripts.
+    /// </param>
+    /// <returns>
+    ///     A dictionary of headers configured for CORS.
+    /// </returns>
     private static Dictionary<string, string> GenerateCORSHeaders(string nonce) {
         return new Dictionary<string, string> {
             { "Access-Control-Allow-Origin", "*" },
@@ -143,6 +157,19 @@ public class HttpManager {
         };
     }
 
+    /// <summary>
+    ///     Starts an HTTP server and begins listening for incoming HTTP requests.
+    /// </summary>
+    /// <remarks>
+    ///     This method initializes an <see cref="HttpListener" />, configures it with the server URL, and
+    ///     starts listening for incoming HTTP requests. If the HTTP server is already running, the method
+    ///     returns without performing any action. Logs messages to indicate the success or failure of the
+    ///     server startup process.
+    /// </remarks>
+    /// <exception cref="System.Exception">
+    ///     Throws an exception if there is an error while starting the server or initializing the HTTP
+    ///     listener.
+    /// </exception>
     public void StartServer() {
         try {
             if (_listener != null) return;
@@ -158,6 +185,12 @@ public class HttpManager {
         }
     }
 
+    /// <summary>
+    ///     Stops the hosting operation and shuts down any related resources such as the HTTP listener.
+    /// </summary>
+    /// <returns>
+    ///     A Task representing the asynchronous operation of stopping the hosting process.
+    /// </returns>
     public async Task StopHosting() {
         _logger.Log(LogLevel.Info, "Stopped hosting clip.");
 
@@ -167,6 +200,12 @@ public class HttpManager {
                        });
     }
 
+    /// <summary>
+    ///     Hosts provided Twitch clip.
+    /// </summary>
+    /// <param name="clipData">
+    ///     The clip data containing details about the Twitch clip to be hosted.
+    /// </param>
     public void HostClip(ClipData clipData) {
         try {
             _clipData = clipData ?? throw new ArgumentNullException(nameof(clipData));
@@ -178,6 +217,12 @@ public class HttpManager {
         }
     }
 
+    /// <summary>
+    ///     Handles incoming HTTP requests asynchronously.
+    /// </summary>
+    /// <param name="result">
+    ///     The IAsyncResult associated with the ongoing asynchronous operation.
+    /// </param>
     private void HandleRequest(IAsyncResult result) {
         if (_listener == null || !_listener.IsListening) return;
 
@@ -204,6 +249,15 @@ public class HttpManager {
         }
     }
 
+    /// <summary>
+    ///     Serves a CSS response to the HTTP client.
+    /// </summary>
+    /// <param name="context">
+    ///     The HTTP listener context which contains both the request and the response objects.
+    /// </param>
+    /// <returns>
+    ///     A Task representing the asynchronous operation of serving the CSS content.
+    /// </returns>
     private static async Task ServeCSS(HttpListenerContext context) {
         context.Response.ContentType = "text/css";
 
@@ -214,6 +268,15 @@ public class HttpManager {
         context.Response.Close();
     }
 
+    /// <summary>
+    ///     Serves an HTML response for an incoming HTTP request.
+    /// </summary>
+    /// <param name="context">
+    ///     The HTTP listener context, which represents the state of an HTTP request and response.
+    /// </param>
+    /// <returns>
+    ///     A task that represents the asynchronous operation of serving an HTML response.
+    /// </returns>
     private async Task ServeHTML(HttpListenerContext context) {
         try {
             string responseString;
@@ -231,6 +294,17 @@ public class HttpManager {
         }
     }
 
+    /// <summary>
+    ///     Sets up the site by generating a nonce, preparing the headers, and returning the prepared HTML
+    ///     and updated context.
+    /// </summary>
+    /// <param name="context">
+    ///     The HTTP listener context that represents the current HTTP request and response being handled.
+    /// </param>
+    /// <returns>
+    ///     A tuple containing the response string (HTML content of the page) and the updated HTTP listener
+    ///     context.
+    /// </returns>
     private async Task<(string responseString, HttpListenerContext context)> SetUpSite(HttpListenerContext context) {
         var nonce = CreateNonce();
 
@@ -239,6 +313,21 @@ public class HttpManager {
         return (await PreparePage(nonce), context);
     }
 
+    /// <summary>
+    ///     Prepares an HTML page by inserting clip and game data into placeholders.
+    /// </summary>
+    /// <param name="nonce">
+    ///     A unique string used to ensure secure communication in the prepared page.
+    /// </param>
+    /// <returns>
+    ///     A string containing the prepared HTML page with relevant clip and game data inserted.
+    /// </returns>
+    /// <exception cref="ArgumentNullException">
+    ///     Thrown when the nonce is null, empty, or consists only of whitespace.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    ///     Thrown when either clip data is null or the game name is null/empty.
+    /// </exception>
     private async Task<string> PreparePage(string nonce) {
         if (string.IsNullOrWhiteSpace(nonce))
             throw new ArgumentNullException(nameof(nonce), "Nonce cannot be null or empty.");
@@ -260,6 +349,19 @@ public class HttpManager {
                        .Replace("[[curatorName]]", _clipData.CreatorName);
     }
 
+    /// <summary>
+    ///     Sets up the necessary headers to configure the HTTP response with proper CORS headers.
+    /// </summary>
+    /// <param name="nonce">
+    ///     A unique string used for security purposes in headers such as the Content-Security-Policy.
+    /// </param>
+    /// <param name="context">
+    ///     The <see cref="HttpListenerContext" /> object representing the current HTTP request and
+    ///     response context.
+    /// </param>
+    /// <returns>
+    ///     The updated <see cref="HttpListenerContext" /> object with the necessary headers applied.
+    /// </returns>
     private static HttpListenerContext ReadyHeaders(string nonce, HttpListenerContext context) {
         var headers = GenerateCORSHeaders(nonce);
 
@@ -268,6 +370,13 @@ public class HttpManager {
         return context;
     }
 
+    /// <summary>
+    ///     Generates a nonce value, a unique identifier, for security purposes. The nonce is a sanitized,
+    ///     Base64-encoded string derived from a GUID and truncated to a specific length.
+    /// </summary>
+    /// <returns>
+    ///     A sanitized, truncated, Base64-encoded string used as a nonce.
+    /// </returns>
     private static string CreateNonce() {
         var guidBytes = Guid.NewGuid().ToByteArray();
         var base64Nonce = Convert.ToBase64String(guidBytes);
@@ -275,10 +384,34 @@ public class HttpManager {
         return SanitizeNonce(base64Nonce).Substring(0, NonceLength);
     }
 
+    /// <summary>
+    ///     Sanitizes a nonce by replacing certain characters to make it URL-friendly.
+    /// </summary>
+    /// <param name="nonce">
+    ///     The original nonce string to be sanitized.
+    /// </param>
+    /// <returns>
+    ///     A sanitized, URL-friendly nonce string.
+    /// </returns>
     private static string SanitizeNonce(string nonce) {
         return nonce.Replace("+", "-").Replace("/", "_").Replace("=", "_");
     }
 
+    /// <summary>
+    ///     Handles sending an error response to the HTTP client and logs the error details.
+    /// </summary>
+    /// <param name="context">
+    ///     The HTTP listener context that contains the request and response objects.
+    /// </param>
+    /// <param name="statusCode">
+    ///     The HTTP status code to send in the response.
+    /// </param>
+    /// <param name="errorMessage">
+    ///     The error message to log and send to the client.
+    /// </param>
+    /// <param name="exception">
+    ///     An optional exception object that provides additional details about the error.
+    /// </param>
     private void HandleError(HttpListenerContext context,
                              int statusCode,
                              string errorMessage,

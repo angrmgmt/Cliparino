@@ -28,6 +28,9 @@ using Streamer.bot.Plugin.Interface.Model;
 
 #endregion
 
+/// <summary>
+///     Provides logging functionality with customizable log levels and message formatting.
+/// </summary>
 public class CPHLogger {
     private const string MessagePrefix = "Cliparino :: ";
     private readonly IInlineInvokeProxy _cph;
@@ -38,6 +41,30 @@ public class CPHLogger {
         _loggingEnabled = loggingEnabled;
     }
 
+    /// <summary>
+    ///     Centralizes logging operations for <see cref="IInlineInvokeProxy.LogDebug" />,
+    ///     <see cref="IInlineInvokeProxy.LogInfo" />, <see cref="IInlineInvokeProxy.LogWarn" />, and
+    ///     <see cref="IInlineInvokeProxy.LogError" />, allowing logging to be gated in one location.
+    /// </summary>
+    /// <param name="level">
+    ///     The severity level of the log message.
+    /// </param>
+    /// <param name="messageBody">
+    ///     The main content of the log message.
+    /// </param>
+    /// <param name="ex">
+    ///     The exception related to the log entry, if applicable. Defaults to null.
+    /// </param>
+    /// <param name="caller">
+    ///     The name of the method that invoked the logger. This is automatically populated by the runtime.
+    /// </param>
+    /// <exception cref="ArgumentNullException">
+    ///     Thrown when the <paramref name="caller" /> parameter is null.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     Thrown when the <paramref name="level" /> parameter is anything other than one of the values in
+    ///     <see cref="LogLevel" />.
+    /// </exception>
     public void Log(LogLevel level, string messageBody, Exception ex = null, [CallerMemberName] string caller = "") {
         if (caller == null) throw new ArgumentNullException(nameof(caller));
 
@@ -54,6 +81,16 @@ public class CPHLogger {
         }
     }
 
+    /// <summary>
+    ///     Logs an error message with an optional exception. If an exception is provided, its message and
+    ///     stack trace will also be logged.
+    /// </summary>
+    /// <param name="message">
+    ///     The error message to log.
+    /// </param>
+    /// <param name="ex">
+    ///     The exception associated with the error, if any. Defaults to null.
+    /// </param>
     private void LogError(string message, Exception ex = null) {
         if (ex == null) {
             _cph.LogError(message);
@@ -64,9 +101,38 @@ public class CPHLogger {
     }
 }
 
+/// <summary>
+///     Represents the severity level for logging messages.
+/// </summary>
 public enum LogLevel {
+    /// <summary>
+    ///     Represents the debug log level in the logging system. This log level is typically used for
+    ///     diagnostic messages that are useful for developers when debugging the application.
+    /// </summary>
     Debug,
+
+    /// <summary>
+    ///     Represents an informational log level used to record general information about the
+    ///     application's operation.
+    /// </summary>
     Info,
+
+    /// <summary>
+    ///     Represents a warning log level.
+    /// </summary>
+    /// <remarks>
+    ///     This log level is used to indicate potential issues or situations that may require attention
+    ///     but do not necessarily prevent the normal execution of the application.
+    /// </remarks>
     Warn,
+
+    /// <summary>
+    ///     Represents the error log level.
+    /// </summary>
+    /// <remarks>
+    ///     This log level is used to report errors within the application. It denotes significant problems
+    ///     that need attention or could potentially disrupt the application's normal operation. It is also
+    ///     the only log level that will be processed even when logging is disabled.
+    /// </remarks>
     Error
 }

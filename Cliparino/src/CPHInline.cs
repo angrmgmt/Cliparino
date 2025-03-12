@@ -78,7 +78,6 @@ public class CPHInline : CPHInlineBase {
 
     private ClipManager _clipManager;
     private bool _initialized;
-
     private bool _isModApproved;
     private CPHLogger _logger;
     private bool _loggingEnabled;
@@ -86,6 +85,17 @@ public class CPHInline : CPHInlineBase {
     private TwitchApiManager _twitchApiManager;
 
     // ReSharper disable once UnusedMember.Global
+    /// <summary>
+    ///     Executes the primary command handling logic. Initializes components and handles commands such
+    ///     as "watch", "shoutout", "replay", and "stop", interacting with Twitch and OBS APIs as needed.
+    /// </summary>
+    /// <returns>
+    ///     True if the command is handled successfully; otherwise, false.
+    /// </returns>
+    /// <remarks>
+    ///     This is the main entry point for the software and requires a public bool signature with no
+    ///     parameters.
+    /// </remarks>
     public bool Execute() {
         InitializeComponents();
 
@@ -140,6 +150,9 @@ public class CPHInline : CPHInlineBase {
         }
     }
 
+    /// <summary>
+    ///     Instantiates and, where applicable, provides default values for Cliparino's various components.
+    /// </summary>
     private void InitializeComponents() {
         if (_initialized) return;
 
@@ -180,6 +193,19 @@ public class CPHInline : CPHInlineBase {
         }
     }
 
+    /// <summary>
+    ///     Handles the "!watch" command to watch Twitch clips. Determines the input type (e.g., URL,
+    ///     username, or search term) and processes the request accordingly. Provides fallback to the last
+    ///     clip if input is invalid.
+    /// </summary>
+    /// <param name="input">
+    ///     The input provided by the user, which can include a Twitch clip URL, a username, or a search
+    ///     term.
+    /// </param>
+    /// <returns>
+    ///     A task representing the operation, with a boolean result indicating whether the command
+    ///     execution was successful.
+    /// </returns>
     private async Task<bool> HandleWatchCommand(string input) {
         _logger.Log(LogLevel.Debug, "Handling !watch command.");
 
@@ -220,11 +246,31 @@ public class CPHInline : CPHInlineBase {
         }
     }
 
+    /// <summary>
+    ///     Validates whether the provided string is a well-formed URL pointing to twitch.tv.
+    /// </summary>
+    /// <param name="input">
+    ///     The string to validate as a URL.
+    /// </param>
+    /// <returns>
+    ///     True if the provided string is a well-formed absolute URL and contains "twitch.tv"; otherwise,
+    ///     false.
+    /// </returns>
     private static bool IsValidUrl(string input) {
         // Simple validation for well-formed URLs; adjust as needed for your specific project
         return Uri.IsWellFormedUriString(input, UriKind.Absolute) && input.Contains("twitch.tv");
     }
 
+    /// <summary>
+    ///     Determines if the provided input is invalid based on certain criteria, such as being empty,
+    ///     whitespace, or the value "about:blank".
+    /// </summary>
+    /// <param name="input">
+    ///     The input string to check for validity.
+    /// </param>
+    /// <returns>
+    ///     True if the input is deemed invalid, otherwise false.
+    /// </returns>
     private bool IsInvalidInput(string input) {
         if (!string.IsNullOrWhiteSpace(input) && !input.Equals("about:blank")) return false;
 
@@ -233,6 +279,13 @@ public class CPHInline : CPHInlineBase {
         return true;
     }
 
+    /// <summary>
+    ///     Attempts to process the last known clip URL as a fallback when the provided input or clip
+    ///     search fails.
+    /// </summary>
+    /// <returns>
+    ///     A task that resolves to a boolean indicating whether processing the last clip was successful.
+    /// </returns>
     private async Task<bool> ProcessLastClipFallback() {
         var lastClipUrl = _clipManager.GetLastClipUrl();
 
@@ -247,6 +300,17 @@ public class CPHInline : CPHInlineBase {
         return false;
     }
 
+    /// <summary>
+    ///     Processes a given Twitch clip URL by retrieving clip data and attempting to play it using
+    ///     relevant APIs. Logs debug and error information based on the operation's outcome.
+    /// </summary>
+    /// <param name="url">
+    ///     The URL of the Twitch clip to process.
+    /// </param>
+    /// <returns>
+    ///     A task representing the asynchronous operation. The result is a boolean indicating whether
+    ///     processing and playback were successful.
+    /// </returns>
     private async Task<bool> ProcessClipByUrl(string url) {
         _logger.Log(LogLevel.Debug, "Valid URL received. Accessing clip data...");
 
@@ -270,6 +334,20 @@ public class CPHInline : CPHInlineBase {
         }
     }
 
+    /// <summary>
+    ///     Resolves the broadcaster ID and search term from the given input.
+    /// </summary>
+    /// <param name="input">
+    ///     The user-provided input, which could be a username, a search term, or both.
+    /// </param>
+    /// <returns>
+    ///     A tuple containing the broadcaster ID and a search term. If the username is not resolved, it
+    ///     returns null for the broadcaster ID and for the search term.
+    /// </returns>
+    /// <remarks>
+    ///     In the case that no valid broadcaster/channel name was supplied, falls back to this channel's
+    ///     broadcaster.
+    /// </remarks>
     private (string broadcasterId, string searchTerm) ResolveBroadcasterAndSearchTerm(string input) {
         input = input.Trim();
 
@@ -302,6 +380,9 @@ public class CPHInline : CPHInlineBase {
         return (userInfo.UserId, searchTerm);
     }
 
+    /// <summary>
+    ///     Provides functionality to manage Twitch clips, including retrieval from cache and searching.
+    /// </summary>
     private async Task<bool> SearchAndPlayClip(string broadcasterId, string searchInput) {
         var cachedClip = ClipManager.GetFromCache(searchInput);
         ClipData bestClip;
@@ -328,6 +409,16 @@ public class CPHInline : CPHInlineBase {
         return _isModApproved;
     }
 
+    /// <summary>
+    ///     Plays the given clip asynchronously by interacting with HTTP and OBS managers.
+    /// </summary>
+    /// <param name="clipData">
+    ///     The data of the clip to be played, including its URL, duration, and title.
+    /// </param>
+    /// <returns>
+    ///     A task that represents the asynchronous operation. The task result contains a boolean
+    ///     indicating whether the clip was successfully played.
+    /// </returns>
     private async Task<bool> PlayClipAsync(ClipData clipData) {
         _httpManager.HostClip(clipData);
 
@@ -340,6 +431,16 @@ public class CPHInline : CPHInlineBase {
         return true;
     }
 
+    /// <summary>
+    ///     Requests approval for a specific clip from moderators, provides the clip details to moderators,
+    ///     and waits for their response within a specified time frame.
+    /// </summary>
+    /// <param name="clip">
+    ///     The clip data that is being submitted for moderator approval.
+    /// </param>
+    /// <returns>
+    ///     A task that resolves to void.
+    /// </returns>
     private async Task RequestClipApproval(ClipData clip) {
         CPH.TwitchReplyToMessage($"Did you mean this clip? {clip.Url}", GetArgument(CPH, "messageId", ""));
         CPH.SendMessage("I'll wait a minute for a mod to approve or deny this clip, starting now.");
@@ -362,6 +463,15 @@ public class CPHInline : CPHInlineBase {
         }
     }
 
+    /// <summary>
+    ///     Waits for a mod's approval of a clip or times out after a specified duration.
+    /// </summary>
+    /// <param name="token">
+    ///     The cancellation token used to cancel the waiting operation.
+    /// </param>
+    /// <returns>
+    ///     A Task that represents the asynchronous operation of waiting for approval or timeout.
+    /// </returns>
     private async Task WaitForApproval(CancellationToken token) {
         var approvalTask = Task.Run(async () => {
                                         while (!_isModApproved && !token.IsCancellationRequested)
@@ -377,6 +487,14 @@ public class CPHInline : CPHInlineBase {
     }
 
     // ReSharper disable once UnusedMember.Global
+    /// <summary>
+    ///     Determines if a moderator has approved or denied an action based on the content of the message
+    ///     that triggered it. Updates and returns the internal approval state.
+    /// </summary>
+    /// <returns>
+    ///     true if a moderator has approved the action, false if denied or if no affirmative words are
+    ///     detected.
+    /// </returns>
     public bool IsModApproved() {
         var isMod = GetArgument(CPH, "isModerator", false);
 
@@ -392,6 +510,17 @@ public class CPHInline : CPHInlineBase {
         return _isModApproved;
     }
 
+    /// <summary>
+    ///     Handles the `!so` command (shoutout) by sending a shoutout to a Twitch username, playing a
+    ///     random clip associated with that user, and managing related OBS scene operations.
+    /// </summary>
+    /// <param name="username">
+    ///     The username of the Twitch user to shout out.
+    /// </param>
+    /// <returns>
+    ///     A task that represents the asynchronous operation. The task result is a boolean indicating
+    ///     whether the command executed successfully.
+    /// </returns>
     private async Task<bool> HandleShoutoutCommand(string username) {
         _logger.Log(LogLevel.Debug, "Handling !so command.");
 
@@ -430,6 +559,14 @@ public class CPHInline : CPHInlineBase {
         }
     }
 
+    /// <summary>
+    ///     Retrieves the clip settings used for clip selection and playback.
+    /// </summary>
+    /// <returns>
+    ///     A <see cref="ClipManager.ClipSettings" /> object containing the clip preferences such as
+    ///     whether only featured clips are allowed, the maximum clip duration in seconds, and the maximum
+    ///     age of the clip in days.
+    /// </returns>
     private ClipManager.ClipSettings GetClipSettings() {
         var featuredOnly = GetArgument(CPH, "featuredOnly", false);
         var maxDuration = GetArgument(CPH, "maxClipSeconds", 30);
@@ -438,6 +575,14 @@ public class CPHInline : CPHInlineBase {
         return new ClipManager.ClipSettings(featuredOnly, maxDuration, maxAgeDays);
     }
 
+    /// <summary>
+    ///     Handles the '!replay' command by retrieving the last captured Twitch clip url and playing it
+    ///     again through OBS if a valid clip is found.
+    /// </summary>
+    /// <returns>
+    ///     true if the replay operation is successfully executed; otherwise, false if an error occurs, or
+    ///     no valid clip is available.
+    /// </returns>
     private async Task<bool> HandleReplayCommand() {
         _logger.Log(LogLevel.Debug, "Handling !replay command.");
 
@@ -467,6 +612,12 @@ public class CPHInline : CPHInlineBase {
     }
 
     // ReSharper disable once UnusedMember.Global
+    /// <summary>
+    ///     Stops the currently active clip playback process and logs the operation status.
+    /// </summary>
+    /// <returns>
+    ///     A boolean indicating whether the clip stop operation was successful (true) or not (false).
+    /// </returns>
     public bool StopClip() {
         try {
             if (_logger == null) {
@@ -487,6 +638,13 @@ public class CPHInline : CPHInlineBase {
         }
     }
 
+    /// <summary>
+    ///     Handles the logic for stopping an ongoing clip, invoked by the "!stop" command.
+    /// </summary>
+    /// <returns>
+    ///     A task representing the asynchronous operation. The task result contains a boolean indicating
+    ///     whether the operation was completed successfully.
+    /// </returns>
     private async Task<bool> HandleStopCommand() {
         _logger.Log(LogLevel.Debug, "Handling !stop command.");
 
@@ -504,15 +662,60 @@ public class CPHInline : CPHInlineBase {
         }
     }
 
+    /// <summary>
+    ///     Retrieves a specified argument from the IInlineInvokeProxy instance and returns its value. If
+    ///     the argument is not found, a default value is returned.
+    /// </summary>
+    /// <typeparam name="T">
+    ///     The type of the argument to be retrieved.
+    /// </typeparam>
+    /// <param name="cph">
+    ///     The IInlineInvokeProxy instance from which to retrieve the argument.
+    /// </param>
+    /// <param name="argName">
+    ///     The name of the argument to be retrieved.
+    /// </param>
+    /// <param name="defaultValue">
+    ///     The default value to return if the argument is not found.
+    /// </param>
+    /// <returns>
+    ///     The value of the specified argument, or the default value if the argument is not found.
+    /// </returns>
+    /// <remarks>
+    ///     Serves a wrapper for <see cref="IInlineInvokeProxy.TryGetArg" /> that returns its resulting
+    ///     argument directly instead of as an "out" parameter.
+    /// </remarks>
     public static T GetArgument<T>(IInlineInvokeProxy cph, string argName, T defaultValue = default) {
         return cph.TryGetArg(argName, out T value) ? value : defaultValue;
     }
 
+    /// <summary>
+    ///     Retrieves the instance of <see cref="HttpManager" />.
+    /// </summary>
+    /// <returns>
+    ///     The current instance of <see cref="HttpManager" />.
+    /// </returns>
     public static HttpManager GetHttpManager() {
         return _httpManager;
     }
 
-    // Levenshtein Distance Calculation
+    /// <summary>
+    ///     Calculates the Levenshtein distance between two strings, which measures the minimum number of
+    ///     single-character edits (insertions, deletions, or substitutions) required to change one string
+    ///     into the other.
+    /// </summary>
+    /// <param name="source">
+    ///     The source string for comparison.
+    /// </param>
+    /// <param name="target">
+    ///     The target string for comparison.
+    /// </param>
+    /// <returns>
+    ///     The Levenshtein distance between the source and target strings.
+    /// </returns>
+    /// <remarks>
+    ///     Deprecated in favor of word-based similarity. Retained for posterity.
+    /// </remarks>
     public static int CalculateLevenshteinDistance(string source, string target) {
         var m = source.Length;
         var n = target.Length;
@@ -534,17 +737,35 @@ public class CPHInline : CPHInlineBase {
     }
 
     // ReSharper disable once UnusedMember.Global
+    /// <summary>
+    ///     Cleans the cache of stored clip data. Removes entries from the cache that are deemed invalid or
+    ///     outdated.
+    /// </summary>
+    /// <returns>
+    ///     Returns true if the cache was cleaned successfully; otherwise, false.
+    /// </returns>
     public bool CleanCache() {
         return _clipManager.CleanCache();
     }
 }
 
+/// <summary>
+///     Provides dimension information for Cliparino display. Namely, the height and width.
+/// </summary>
 public class Dimensions {
     public Dimensions(int height = 1080, int width = 1920) {
         Height = height;
         Width = width;
     }
 
+    /// <summary>
+    ///     Gets the height dimension of the object, typically representing a vertical measurement in
+    ///     pixels.
+    /// </summary>
     public int Height { get; }
+
+    /// <summary>
+    ///     Gets the width of the dimensions, represented as an integer value.
+    /// </summary>
     public int Width { get; }
 }

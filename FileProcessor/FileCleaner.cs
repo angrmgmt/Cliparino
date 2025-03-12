@@ -7,11 +7,13 @@ using System.Linq;
 
 #endregion
 
+/// <summary>
+///     A simple class designed to stitch together and clean up many project files to bring them
+///     together into one Streamer.bot-friendly code file.
+/// </summary>
 internal static class FileProcessor {
-    // Define the output file
     private const string OutputFile = "Output/Cliparino_Clean.cs";
 
-    // Define the order of the files to process and merge
     private static readonly string[] FileProcessingOrder = {
         "../Cliparino/src/CPHInline.cs",
         "../Cliparino/src/Managers/CPHLogger.cs",
@@ -39,8 +41,6 @@ internal static class FileProcessor {
             Console.WriteLine($"  Path: {fullPath} -- Exists: {File.Exists(fullPath)}");
         }
 
-
-        // If the saved file isn't part of the known processing order, skip it
         if (!FileProcessingOrder.Contains(savedFilePath)) {
             Console.WriteLine($"[FileProcessor] Skipping file '{savedFilePath}'. Not part of FileProcessingOrder.");
 
@@ -48,7 +48,6 @@ internal static class FileProcessor {
         }
 
         try {
-            // Process and merge the files into a single output file
             ProcessFiles(FileProcessingOrder, OutputFile);
         } catch (Exception ex) {
             Console.WriteLine($"[FileProcessor] Error while processing files: {ex.Message}");
@@ -71,11 +70,10 @@ internal static class FileProcessor {
             foreach (var line in lines) {
                 var trimmedLine = line.Trim();
 
-                // Add to a list if it's a valid `using` directive
                 if (!trimmedLine.StartsWith("using ", StringComparison.Ordinal) || !trimmedLine.EndsWith(";")) continue;
 
                 Console.WriteLine($"  [Found Using] {trimmedLine}");
-                usingDirectives.Add(trimmedLine); // Deduplicates automatically because of HashSet
+                usingDirectives.Add(trimmedLine);
             }
         }
 
@@ -122,8 +120,16 @@ internal static class FileProcessor {
         Console.WriteLine($"[FileProcessor] Successfully wrote merged file: {Path.GetFullPath(outputFile)}");
     }
 
+    /// <summary>
+    ///     Runs through and applies the Regular Expressions replacement rules defined for the project.
+    /// </summary>
+    /// <param name="content">
+    ///     The content of the code file being processed.
+    /// </param>
+    /// <returns>
+    ///     The result of applying the Regular Expressions rules to the content, producing cleaned content.
+    /// </returns>
     private static string ProcessRegex(string content) {
-        // Remove using directives
         var lines = content.Split(new[] { Environment.NewLine }, StringSplitOptions.None);
         var nonUsingLines = lines.Where(line => !line.TrimStart().StartsWith("using ", StringComparison.Ordinal));
         var cleanedContent = string.Join(Environment.NewLine, nonUsingLines);

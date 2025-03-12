@@ -4,6 +4,10 @@ using System.Text.RegularExpressions;
 
 #endregion
 
+/// <summary>
+///     A storage class for Regular Expressions objects representing replacement rules for unwanted
+///     text in project files.
+/// </summary>
 internal static class RegexUtilities {
     private static Regex XmlDocCommentsRegex() {
         return new Regex(@"^\s*///.*$", RegexOptions.Multiline);
