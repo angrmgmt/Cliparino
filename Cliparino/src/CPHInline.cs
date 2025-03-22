@@ -649,7 +649,7 @@ public class CPHInline : CPHInlineBase {
     ///     A task representing the asynchronous operation. The task result contains a boolean indicating
     ///     whether the operation was completed successfully.
     /// </returns>
-    private async Task<bool> HandleStopCommand(bool shutdown = false) {
+    private async Task<bool> HandleStopCommand() {
         _logger.Log(LogLevel.Debug, "Handling !stop command.");
 
         try {
