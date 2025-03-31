@@ -193,6 +193,10 @@ public class CPHInline : CPHInlineBase {
         }
     }
 
+    public void Dispose() {
+        _httpManager.StopHosting().GetAwaiter().GetResult();
+    }
+
     /// <summary>
     ///     Handles the "!watch" command to watch Twitch clips. Determines the input type (e.g., URL,
     ///     username, or search term) and processes the request accordingly. Provides fallback to the last
@@ -650,9 +654,9 @@ public class CPHInline : CPHInlineBase {
 
         try {
             await _obsSceneManager.StopClip();
-            await _httpManager.StopHosting();
-
-            _httpManager.Client.CancelPendingRequests();
+            // await _httpManager.StopHosting();
+            //
+            // _httpManager.Client.CancelPendingRequests();
 
             return true;
         } catch (Exception ex) {

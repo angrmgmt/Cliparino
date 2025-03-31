@@ -21,6 +21,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -154,6 +155,21 @@ public class HttpManager {
                 "Content-Security-Policy",
                 $"script-src 'nonce-{nonce}' 'strict-dynamic'; object-src 'none'; base-uri 'none'; frame-ancestors 'self' https://clips.twitch.tv;"
             }
+        };
+    }
+
+    /// <summary>
+    ///     Generates a dictionary containing headers for cache control configuration.
+    ///     (i.e. Disables caching of responses on client browsers.) 
+    /// </summary>
+    /// <returns>
+    ///     A dictionary of headers configured for cache control.
+    /// </returns>
+    private static Dictionary<string, string> GenerateCacheControlHeaders() {
+        return new Dictionary<string, string> {
+            { "Cache-Control", "no-cache, no-store, must-revalidate" },
+            { "Pragma", "no-cache" },
+            { "Expires", "0" },
         };
     }
 
@@ -363,7 +379,10 @@ public class HttpManager {
     ///     The updated <see cref="HttpListenerContext" /> object with the necessary headers applied.
     /// </returns>
     private static HttpListenerContext ReadyHeaders(string nonce, HttpListenerContext context) {
-        var headers = GenerateCORSHeaders(nonce);
+        var headers = new List<Dictionary<string, string>> {
+            GenerateCORSHeaders(nonce),
+            GenerateCacheControlHeaders(),
+        }.SelectMany(dict => dict).ToDictionary(pair => pair.Key, pair => pair.Value);
 
         foreach (var header in headers) context.Response.Headers[header.Key] = header.Value;
 

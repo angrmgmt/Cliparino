@@ -127,7 +127,7 @@ public class ObsSceneManager {
     ///     The URL string of the player if found; otherwise, a message indicating no URL was found.
     /// </returns>
     private string GetPlayerUrl() {
-        var playerUrl = GetPlayerSettings()?["url"]?.ToString();
+        var playerUrl = GetPlayerSettings()?["inputSettings"]?["url"]?.ToString();
 
         _logger.Log(LogLevel.Debug, $"Player URL: {playerUrl}");
 
