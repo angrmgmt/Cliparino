@@ -132,10 +132,10 @@ public class CPHInline : CPHInlineBase {
             _logger.Log(LogLevel.Info, $"Executing command: {command}");
 
             switch (command.ToLower()) {
-                case "!watch": return HandleWatchCommand(GetArgument(CPH, "input0", "")).GetAwaiter().GetResult();
-                case "!so": return HandleShoutoutCommand(GetArgument(CPH, "input0", "")).GetAwaiter().GetResult();
-                case "!replay": return HandleReplayCommand().GetAwaiter().GetResult();
-                case "!stop": return HandleStopCommand().GetAwaiter().GetResult();
+                case "!watch": return HandleWatchCommandAsync(GetArgument(CPH, "input0", "")).GetAwaiter().GetResult();
+                case "!so": return HandleShoutoutCommandAsync(GetArgument(CPH, "input0", "")).GetAwaiter().GetResult();
+                case "!replay": return HandleReplayCommandAsync().GetAwaiter().GetResult();
+                case "!stop": return HandleStopCommandAsync().GetAwaiter().GetResult();
                 default:
                     _logger.Log(LogLevel.Warn, $"Unknown command received: {command}");
 
@@ -210,7 +210,7 @@ public class CPHInline : CPHInlineBase {
     ///     A task representing the operation, with a boolean result indicating whether the command
     ///     execution was successful.
     /// </returns>
-    private async Task<bool> HandleWatchCommand(string input) {
+    private async Task<bool> HandleWatchCommandAsync(string input) {
         _logger.Log(LogLevel.Debug, "Handling !watch command.");
 
         try {
@@ -222,15 +222,17 @@ public class CPHInline : CPHInlineBase {
                 return await ProcessLastClipFallback();
             }
 
-            _logger.Log(LogLevel.Debug, "Input 0 is a valid URL, username, or search term. Checking for URL...");
+            if (IsUsername(input)) {
+                _logger.Log(LogLevel.Debug, "Input 0 is a username.");
+            } else {
+                _logger.Log(LogLevel.Debug, "Input 0 is a valid URL or search term. Checking for URL...");
 
-            if (IsValidUrl(input)) {
-                _logger.Log(LogLevel.Debug, "Input 0 is a valid URL. Processing...");
+                if (IsValidUrl(input)) {
+                    _logger.Log(LogLevel.Debug, "Input 0 is a valid URL. Processing...");
 
-                return await ProcessClipByUrl(input);
+                    return await ProcessClipByUrl(input);
+                }
             }
-
-            _logger.Log(LogLevel.Debug, "Input 0 is not a valid URL. Checking username...");
 
             var (broadcasterId, searchTerm) = ResolveBroadcasterAndSearchTerm(input);
 
@@ -250,6 +252,10 @@ public class CPHInline : CPHInlineBase {
         }
     }
 
+    private static bool IsUsername(string input) {
+        return input.Trim().StartsWith("@");
+    }
+
     /// <summary>
     ///     Validates whether the provided string is a well-formed URL pointing to twitch.tv.
     /// </summary>
@@ -261,7 +267,6 @@ public class CPHInline : CPHInlineBase {
     ///     false.
     /// </returns>
     private static bool IsValidUrl(string input) {
-        // Simple validation for well-formed URLs; adjust as needed for your specific project
         return Uri.IsWellFormedUriString(input, UriKind.Absolute) && input.Contains("twitch.tv");
     }
 
@@ -356,12 +361,8 @@ public class CPHInline : CPHInlineBase {
         input = input.Trim();
 
         var inputArgs = input.Split(new[] { ' ' }, 2, StringSplitOptions.RemoveEmptyEntries);
-        var username = inputArgs[0].StartsWith("@") ? inputArgs[0].Substring(1) : null;
-        var searchTerm = inputArgs.Length > 1
-                             ? inputArgs[1]
-                             : username == null
-                                 ? inputArgs[0]
-                                 : null;
+        var username = IsUsername(inputArgs[0]) ? inputArgs[0] : CPH.TwitchGetBroadcaster().UserName;
+        var searchTerm = inputArgs.Length > 1 ? inputArgs[1] : inputArgs[0];
 
         if (string.IsNullOrEmpty(username)) {
             var broadcaster = CPH.TwitchGetBroadcaster();
@@ -428,7 +429,7 @@ public class CPHInline : CPHInlineBase {
 
         await _obsSceneManager.PlayClipAsync(clipData);
         await Task.Delay((int)clipData.Duration * 1000 + 3000);
-        await HandleStopCommand();
+        await HandleStopCommandAsync();
 
         _clipManager.SetLastClipUrl(clipData.Url);
 
@@ -525,7 +526,7 @@ public class CPHInline : CPHInlineBase {
     ///     A task that represents the asynchronous operation. The task result is a boolean indicating
     ///     whether the command executed successfully.
     /// </returns>
-    private async Task<bool> HandleShoutoutCommand(string username) {
+    private async Task<bool> HandleShoutoutCommandAsync(string username) {
         _logger.Log(LogLevel.Debug, "Handling !so command.");
 
         try {
@@ -551,7 +552,7 @@ public class CPHInline : CPHInlineBase {
 
             await _obsSceneManager.PlayClipAsync(clipData);
             await Task.Delay((int)clipData.Duration * 1000 + 3000);
-            await HandleStopCommand();
+            await HandleStopCommandAsync();
 
             _clipManager.SetLastClipUrl(clipData.Url);
 
@@ -587,7 +588,7 @@ public class CPHInline : CPHInlineBase {
     ///     true if the replay operation is successfully executed; otherwise, false if an error occurs, or
     ///     no valid clip is available.
     /// </returns>
-    private async Task<bool> HandleReplayCommand() {
+    private async Task<bool> HandleReplayCommandAsync() {
         _logger.Log(LogLevel.Debug, "Handling !replay command.");
 
         try {
@@ -600,7 +601,7 @@ public class CPHInline : CPHInlineBase {
 
                 await _obsSceneManager.PlayClipAsync(clipData);
                 await Task.Delay((int)clipData.Duration * 1000 + 3000);
-                await HandleStopCommand();
+                await HandleStopCommandAsync();
 
                 return true;
             }
@@ -632,7 +633,7 @@ public class CPHInline : CPHInlineBase {
 
             _logger.Log(LogLevel.Info, "Stopping clip.");
 
-            HandleStopCommand().GetAwaiter().GetResult();
+            HandleStopCommandAsync().GetAwaiter().GetResult();
 
             return true;
         } catch (Exception ex) {
@@ -649,7 +650,7 @@ public class CPHInline : CPHInlineBase {
     ///     A task representing the asynchronous operation. The task result contains a boolean indicating
     ///     whether the operation was completed successfully.
     /// </returns>
-    private async Task<bool> HandleStopCommand() {
+    private async Task<bool> HandleStopCommandAsync() {
         _logger.Log(LogLevel.Debug, "Handling !stop command.");
 
         try {

@@ -212,6 +212,7 @@ public class ObsSceneManager {
     private async Task SetBrowserSourceAsync(string url) {
         try {
             _logger.Log(LogLevel.Debug, $"Setting Player URL to '{url}'.");
+
             await Task.Run(() => _cph.ObsSetBrowserSource(CliparinoSourceName, PlayerSourceName, url));
         } catch (Exception ex) {
             _logger.Log(LogLevel.Error, "Error setting OBS browser source.", ex);
@@ -471,7 +472,7 @@ public class ObsSceneManager {
                 return;
             }
 
-            var inputVolumePayload = GenerateSetInputVolumePayload(-6);
+            var inputVolumePayload = GenerateSetInputVolumePayload(-12);
             var inputVolumeResponse = _cph.ObsSendRaw(inputVolumePayload.RequestType,
                                                       JsonConvert.SerializeObject(inputVolumePayload.RequestData));
 
