@@ -77,8 +77,10 @@ _TeamCity*
 !/LICENSE
 !Cliparino.sln
 !Cliparino/src/CPHInline.cs
-# Assets or binaries (adjust to your needs—add exceptions if keeping some assets)
-assets/*.png
-assets/*.jpg
-assets/*.xlsx
-assets/*.csv
+
+# Other stuff (extensions, NPM files, crude drawrings, etc.)
+/CodeMaid.config
+/package.json
+/FileProcessor/Output/
+/plantuml/
+/assets/
