@@ -1,0 +1,37 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{72B75707-BF46-463A-B930-305EDFB88DB9}"
+	ProjectSection(SolutionItems) = preProject
+		.gitignore = .gitignore
+		README.md = README.md
+	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cliparino", "Cliparino\Cliparino.csproj", "{169F251E-E39E-4E2C-ADA7-C0E8C731D63D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FileProcessor", "FileProcessor\FileProcessor.csproj", "{7C0BE22C-56CC-44D8-B5CE-A5A1CFB5EF6B}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{169F251E-E39E-4E2C-ADA7-C0E8C731D63D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{169F251E-E39E-4E2C-ADA7-C0E8C731D63D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{169F251E-E39E-4E2C-ADA7-C0E8C731D63D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{169F251E-E39E-4E2C-ADA7-C0E8C731D63D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7C0BE22C-56CC-44D8-B5CE-A5A1CFB5EF6B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7C0BE22C-56CC-44D8-B5CE-A5A1CFB5EF6B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7C0BE22C-56CC-44D8-B5CE-A5A1CFB5EF6B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7C0BE22C-56CC-44D8-B5CE-A5A1CFB5EF6B}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {9B2E5171-A481-46C5-84C5-014D7CA9EBB8}
+	EndGlobalSection
+EndGlobal
