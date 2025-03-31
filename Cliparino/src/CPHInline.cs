@@ -224,6 +224,7 @@ public class CPHInline : CPHInlineBase {
 
             if (IsUsername(input)) {
                 _logger.Log(LogLevel.Debug, "Input 0 is a username.");
+                
             } else {
                 _logger.Log(LogLevel.Debug, "Input 0 is a valid URL or search term. Checking for URL...");
 
@@ -362,7 +363,9 @@ public class CPHInline : CPHInlineBase {
 
         var inputArgs = input.Split(new[] { ' ' }, 2, StringSplitOptions.RemoveEmptyEntries);
         var username = IsUsername(inputArgs[0]) ? inputArgs[0] : CPH.TwitchGetBroadcaster().UserName;
-        var searchTerm = inputArgs.Length > 1 ? inputArgs[1] : inputArgs[0];
+        var searchTerm = inputArgs.Length > 1
+                             ? inputArgs[1]
+                             : inputArgs[0];
 
         if (string.IsNullOrEmpty(username)) {
             var broadcaster = CPH.TwitchGetBroadcaster();
