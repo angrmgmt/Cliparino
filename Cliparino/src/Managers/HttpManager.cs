@@ -167,9 +167,7 @@ public class HttpManager {
     /// </returns>
     private static Dictionary<string, string> GenerateCacheControlHeaders() {
         return new Dictionary<string, string> {
-            { "Cache-Control", "no-cache, no-store, must-revalidate" },
-            { "Pragma", "no-cache" },
-            { "Expires", "0" },
+            { "Cache-Control", "no-cache, no-store, must-revalidate" }, { "Pragma", "no-cache" }, { "Expires", "0" }
         };
     }
 
@@ -355,7 +353,7 @@ public class HttpManager {
         if (string.IsNullOrWhiteSpace(gameName))
             throw new InvalidOperationException("Game name cannot be null or empty.");
 
-        _logger.Log(LogLevel.Error, $"Preparing page for clip '{_clipData.Id}'...");
+        _logger.Log(LogLevel.Debug, $"Preparing page for clip '{_clipData.Id}'...");
 
         return HTMLText.Replace("[[clipId]]", _clipData.Id)
                        .Replace("[[nonce]]", nonce)
@@ -379,10 +377,9 @@ public class HttpManager {
     ///     The updated <see cref="HttpListenerContext" /> object with the necessary headers applied.
     /// </returns>
     private static HttpListenerContext ReadyHeaders(string nonce, HttpListenerContext context) {
-        var headers = new List<Dictionary<string, string>> {
-            GenerateCORSHeaders(nonce),
-            GenerateCacheControlHeaders(),
-        }.SelectMany(dict => dict).ToDictionary(pair => pair.Key, pair => pair.Value);
+        var headers = new List<Dictionary<string, string>> { GenerateCORSHeaders(nonce), GenerateCacheControlHeaders() }
+                      .SelectMany(dict => dict)
+                      .ToDictionary(pair => pair.Key, pair => pair.Value);
 
         foreach (var header in headers) context.Response.Headers[header.Key] = header.Value;
 

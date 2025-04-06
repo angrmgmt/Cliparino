@@ -223,7 +223,6 @@ public class TwitchApiManager {
     private async Task<T> FetchDataAsync<T>(string endpoint) {
         ValidateEndpoint(endpoint);
         ValidateOAuthInfo();
-        LogHttpManagerValidity();
 
         var completeUrl = GetCompleteUrl(endpoint);
 
@@ -275,16 +274,6 @@ public class TwitchApiManager {
     }
 
     /// <summary>
-    ///     Logs the validity of HTTP manager components, including the HTTP manager, client, and base URI.
-    /// </summary>
-    /// <remarks>
-    ///     Logs messages indicating the validity of various HTTP manager components at the debug level.
-    /// </remarks>
-    private void LogHttpManagerValidity() {
-        /* Implementation */
-    }
-
-    /// <summary>
     ///     Constructs a complete URL by combining the base address and the provided endpoint.
     /// </summary>
     /// <param name="endpoint">
@@ -297,7 +286,7 @@ public class TwitchApiManager {
     ///     If the base address is null, a default value of "https://www.google.com" is used.
     /// </remarks>
     private string GetCompleteUrl(string endpoint) {
-        var baseAddress = HTTPManager?.Client?.BaseAddress?.ToString() ?? "https://www.google.com";
+        var baseAddress = HTTPManager?.Client?.BaseAddress?.ToString() ?? "https://www.google.com/search?q=";
 
         return new Uri(new Uri(baseAddress), endpoint).ToString();
     }

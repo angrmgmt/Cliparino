@@ -129,11 +129,13 @@ public class CPHInline : CPHInlineBase {
                 return false;
             }
 
+            var input = GetArgument(CPH, "rawInput", "");
+
             _logger.Log(LogLevel.Info, $"Executing command: {command}");
 
             switch (command.ToLower()) {
-                case "!watch": return HandleWatchCommandAsync(GetArgument(CPH, "input0", "")).GetAwaiter().GetResult();
-                case "!so": return HandleShoutoutCommandAsync(GetArgument(CPH, "input0", "")).GetAwaiter().GetResult();
+                case "!watch": return HandleWatchCommandAsync(input).GetAwaiter().GetResult();
+                case "!so": return HandleShoutoutCommandAsync(input).GetAwaiter().GetResult();
                 case "!replay": return HandleReplayCommandAsync().GetAwaiter().GetResult();
                 case "!stop": return HandleStopCommandAsync().GetAwaiter().GetResult();
                 default:
@@ -211,31 +213,33 @@ public class CPHInline : CPHInlineBase {
     ///     execution was successful.
     /// </returns>
     private async Task<bool> HandleWatchCommandAsync(string input) {
-        _logger.Log(LogLevel.Debug, "Handling !watch command.");
+        _logger.Log(LogLevel.Info, "Handling !watch command.");
+        _logger.Log(LogLevel.Debug, $"Processing input: {input}");
 
         try {
-            _logger.Log(LogLevel.Debug, $"Determining type of Input 0: {input}...");
+            _logger.Log(LogLevel.Debug, "Testing input validity...");
 
-            if (IsInvalidInput(input)) {
-                _logger.Log(LogLevel.Debug, "Input 0 is invalid. Falling back to last clip...");
+            if (!IsValidInput(input)) {
+                _logger.Log(LogLevel.Debug, "Input is invalid. Falling back to last clip...");
 
                 return await ProcessLastClipFallback();
             }
 
+            _logger.Log(LogLevel.Debug, "Testing input for username...");
+
             if (IsUsername(input)) {
-                _logger.Log(LogLevel.Debug, "Input 0 is a username.");
-                
+                _logger.Log(LogLevel.Debug, "Input is a username.");
             } else {
-                _logger.Log(LogLevel.Debug, "Input 0 is a valid URL or search term. Checking for URL...");
+                _logger.Log(LogLevel.Debug, "Input is a valid URL or search term. Checking for URL...");
 
                 if (IsValidUrl(input)) {
-                    _logger.Log(LogLevel.Debug, "Input 0 is a valid URL. Processing...");
+                    _logger.Log(LogLevel.Debug, "Input is a valid URL. Processing...");
 
                     return await ProcessClipByUrl(input);
                 }
             }
 
-            var (broadcasterId, searchTerm) = ResolveBroadcasterAndSearchTerm(input);
+            var searchTerm = ResolveBroadcasterAndSearchTerm(input, out var broadcasterId);
 
             if (string.IsNullOrEmpty(broadcasterId)) {
                 CPH.SendMessage("Unable to resolve channel by username. Please try again with a valid username or URL.");
@@ -246,10 +250,16 @@ public class CPHInline : CPHInlineBase {
             _logger.Log(LogLevel.Debug, "Input reconciled. Searching for clips...");
 
             return await SearchAndPlayClip(broadcasterId, searchTerm);
+        } catch (NullReferenceException ex) {
+            _logger.Log(LogLevel.Error, "Null reference exception occurred while handling !watch command.", ex);
+
+            return false;
         } catch (Exception ex) {
             _logger.Log(LogLevel.Error, "Error occurred while handling !watch command.", ex);
 
             return false;
+        } finally {
+            _isModApproved = false;
         }
     }
 
@@ -281,12 +291,12 @@ public class CPHInline : CPHInlineBase {
     /// <returns>
     ///     True if the input is deemed invalid, otherwise false.
     /// </returns>
-    private bool IsInvalidInput(string input) {
-        if (!string.IsNullOrWhiteSpace(input) && !input.Equals("about:blank")) return false;
+    private bool IsValidInput(string input) {
+        if (!string.IsNullOrWhiteSpace(input) && !input.Equals("about:blank")) return true;
 
-        _logger.Log(LogLevel.Warn, "No valid clip URL or search term provided.");
+        _logger.Log(LogLevel.Error, "No valid clip URL or search term provided.");
 
-        return true;
+        return false;
     }
 
     /// <summary>
@@ -348,50 +358,57 @@ public class CPHInline : CPHInlineBase {
     ///     Resolves the broadcaster ID and search term from the given input.
     /// </summary>
     /// <param name="input">
-    ///     The user-provided input, which could be a username, a search term, or both.
+    ///     The user-provided input, which could be a username or a search term.
+    /// </param>
+    /// <param name="broadcasterId">
+    ///     Outputs the unique Twitch broadcaster ID of the broadcaster whose channel should be searched
+    ///     for clips.
     /// </param>
     /// <returns>
-    ///     A tuple containing the broadcaster ID and a search term. If the username is not resolved, it
-    ///     returns null for the broadcaster ID and for the search term.
+    ///     A string representing the search term derived from the input.
+    ///     This might include parameters or additional keywords.
     /// </returns>
     /// <remarks>
-    ///     In the case that no valid broadcaster/channel name was supplied, falls back to this channel's
-    ///     broadcaster.
+    ///     If no valid broadcaster or channel name is supplied, this method defaults to the current
+    ///     broadcaster's ID.
     /// </remarks>
-    private (string broadcasterId, string searchTerm) ResolveBroadcasterAndSearchTerm(string input) {
+    private string ResolveBroadcasterAndSearchTerm(string input, out string broadcasterId) {
         input = input.Trim();
 
         var inputArgs = input.Split(new[] { ' ' }, 2, StringSplitOptions.RemoveEmptyEntries);
-        var username = IsUsername(inputArgs[0]) ? inputArgs[0] : CPH.TwitchGetBroadcaster().UserName;
-        var searchTerm = inputArgs.Length > 1
-                             ? inputArgs[1]
-                             : inputArgs[0];
+        var username = IsUsername(inputArgs[0]) ? inputArgs[0] : CPH.TwitchGetBroadcaster().UserLogin;
 
         if (string.IsNullOrEmpty(username)) {
             var broadcaster = CPH.TwitchGetBroadcaster();
 
-            _logger.Log(LogLevel.Debug, $"Using current broadcaster: {broadcaster.UserName}");
+            _logger.Log(LogLevel.Debug,
+                        $"No valid channel name passed, using current broadcaster: {broadcaster.UserName}");
+            broadcasterId = broadcaster.UserId;
 
-            return (broadcaster.UserId, searchTerm);
+            return string.Join(" ", inputArgs);
         }
 
         var userInfo = CPH.TwitchGetExtendedUserInfoByLogin(username);
 
         if (userInfo == null) {
             _logger.Log(LogLevel.Warn, $"Could not resolve username: {username}");
+            broadcasterId = null;
 
-            return (null, null);
+            return string.Join(" ", inputArgs);
         }
 
         _logger.Log(LogLevel.Debug, $"Resolved Broadcaster ID: {userInfo.UserId} for username: {username}");
+        broadcasterId = userInfo.UserId;
 
-        return (userInfo.UserId, searchTerm);
+        return string.Join(" ", inputArgs);
     }
 
     /// <summary>
     ///     Provides functionality to manage Twitch clips, including retrieval from cache and searching.
     /// </summary>
     private async Task<bool> SearchAndPlayClip(string broadcasterId, string searchInput) {
+        _logger.Log(LogLevel.Debug, $"Searching for clip for ID: {broadcasterId} and search term: {searchInput}...");
+
         var cachedClip = ClipManager.GetFromCache(searchInput);
         ClipData bestClip;
 
