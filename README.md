@@ -1,4 +1,4 @@
-#~~~~ Cliparino
+# Cliparino
 
 Streamer Bot clip player for Twitch.tv.
 
@@ -60,7 +60,9 @@ and even goes a bit further, allowing you to:
 
 ### Stop
 
-- `!stop` will stop the current clip playback. The next clip in the queue will be played.
+- `!stop` will stop the current clip playback.
+  The next clip in the queue will be played after a delay.
+  This delay is unintended but should be fixed in a future hotfix.
 
 ### Settings
 
