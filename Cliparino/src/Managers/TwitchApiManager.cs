@@ -20,6 +20,7 @@
 #region
 
 using System;
+using System.Collections;
 using System.Net.Http;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
@@ -106,12 +107,10 @@ public class TwitchApiManager {
 
         _logger.Log(LogLevel.Debug, $"Calling Twitch API with URL: {url}");
 
-
         var request = new HttpRequestMessage(HttpMethod.Get, url);
 
         try {
-            request.Headers.Add("Client-Id", $"{_oauthInfo.TwitchClientId}");
-            request.Headers.Add("Authorization", $"Bearer {_oauthInfo.TwitchOAuthToken}");
+            ConfigureHttpRequestHeaders();
 
             var response = await HTTPManager.Client.SendAsync(request);
 
@@ -122,6 +121,16 @@ public class TwitchApiManager {
             _logger.Log(LogLevel.Debug, $"API Response: {responseBody}");
 
             return JsonConvert.DeserializeObject<ClipManager.ClipsResponse>(responseBody);
+        } catch (HttpRequestException ex) {
+            _logger.Log(LogLevel.Error, "Error occurred while fetching clips.", ex);
+
+            if (ex.Data.Count <= 0) return null;
+
+            _logger.Log(LogLevel.Debug, "Details:\n{ex.Data.ToString()}");
+
+            foreach (DictionaryEntry de in ex.Data) _logger.Log(LogLevel.Debug, $"Key: {de.Key}, Value: {de.Value}");
+
+            return null;
         } catch (Exception ex) {
             _logger.Log(LogLevel.Error, "Error occurred while fetching clips.", ex);
 
@@ -147,12 +156,9 @@ public class TwitchApiManager {
     ///     A complete URL string for the Twitch Clips API.
     /// </returns>
     private static string BuildClipsApiUrl(string broadcasterId, string cursor = "", int first = 20) {
-        var url = $"https://api.twitch.tv/helix/clips?broadcaster_id={broadcasterId}";
+        var url = $"https://api.twitch.tv/helix/clips?broadcaster_id={broadcasterId}&first={first}";
 
-        if (!string.IsNullOrWhiteSpace(cursor))
-            url += $"&after={cursor}";
-        else
-            url += $"&first={first}";
+        if (!string.IsNullOrWhiteSpace(cursor)) url += $"&after={cursor}";
 
         return url;
     }
@@ -257,7 +263,12 @@ public class TwitchApiManager {
     ///     Thrown if the <paramref name="endpoint" /> is null or empty.
     /// </exception>
     private static void ValidateEndpoint(string endpoint) {
-        if (string.IsNullOrWhiteSpace(endpoint))
+        const string blankClipTemplate = "clips?id=";
+        const string blankGameTemplate = "games?id=";
+
+        if (string.IsNullOrWhiteSpace(endpoint)
+            || endpoint.Equals(blankClipTemplate)
+            || endpoint.Equals(blankGameTemplate))
             throw new ArgumentNullException(nameof(endpoint), "Endpoint cannot be null or empty.");
     }
 
@@ -285,7 +296,7 @@ public class TwitchApiManager {
     /// <remarks>
     ///     If the base address is null, a default value of "https://www.google.com" is used.
     /// </remarks>
-    private string GetCompleteUrl(string endpoint) {
+    private static string GetCompleteUrl(string endpoint) {
         var baseAddress = HTTPManager?.Client?.BaseAddress?.ToString() ?? "https://www.google.com/search?q=";
 
         return new Uri(new Uri(baseAddress), endpoint).ToString();

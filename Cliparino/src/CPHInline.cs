@@ -241,11 +241,18 @@ public class CPHInline : CPHInlineBase {
 
             var searchTerm = ResolveBroadcasterAndSearchTerm(input, out var broadcasterId);
 
-            if (string.IsNullOrEmpty(broadcasterId)) {
+            if (string.IsNullOrWhiteSpace(broadcasterId)) {
                 CPH.SendMessage("Unable to resolve channel by username. Please try again with a valid username or URL.");
 
                 return false;
             }
+
+            if (string.IsNullOrWhiteSpace(searchTerm)) {
+                CPH.SendMessage("Please provide a valid search term to find a clip.");
+
+                return false;
+            }
+
 
             _logger.Log(LogLevel.Debug, "Input reconciled. Searching for clips...");
 
@@ -264,7 +271,7 @@ public class CPHInline : CPHInlineBase {
     }
 
     private static bool IsUsername(string input) {
-        return input.Trim().StartsWith("@");
+        return !string.IsNullOrWhiteSpace(input) && input.StartsWith("@");
     }
 
     /// <summary>
@@ -374,33 +381,47 @@ public class CPHInline : CPHInlineBase {
     /// </remarks>
     private string ResolveBroadcasterAndSearchTerm(string input, out string broadcasterId) {
         input = input.Trim();
+        broadcasterId = null;
 
-        var inputArgs = input.Split(new[] { ' ' }, 2, StringSplitOptions.RemoveEmptyEntries);
-        var username = IsUsername(inputArgs[0]) ? inputArgs[0] : CPH.TwitchGetBroadcaster().UserLogin;
+        if (string.IsNullOrEmpty(input)) {
+            _logger.Log(LogLevel.Warn, "Input is empty. No broadcaster or search term can be resolved.");
 
-        if (string.IsNullOrEmpty(username)) {
-            var broadcaster = CPH.TwitchGetBroadcaster();
-
-            _logger.Log(LogLevel.Debug,
-                        $"No valid channel name passed, using current broadcaster: {broadcaster.UserName}");
-            broadcasterId = broadcaster.UserId;
-
-            return string.Join(" ", inputArgs);
+            return string.Empty;
         }
 
-        var userInfo = CPH.TwitchGetExtendedUserInfoByLogin(username);
+        // Split the input into parts, assuming that input can either be "@username searchTerm" or just "searchTerm"
+        var inputParts = input.Split(new[] { ' ' }, 2, StringSplitOptions.RemoveEmptyEntries);
+        var firstPart = inputParts[0];
+        var secondPart = inputParts.Length > 1 ? inputParts[1] : string.Empty;
 
-        if (userInfo == null) {
-            _logger.Log(LogLevel.Warn, $"Could not resolve username: {username}");
-            broadcasterId = null;
+        if (IsUsername(firstPart)) {
+            // If the first part is a username, resolve it
+            var username = firstPart.Substring(1); // Remove '@'
+            var userInfo = CPH.TwitchGetExtendedUserInfoByLogin(username);
 
-            return string.Join(" ", inputArgs);
+            if (userInfo != null) {
+                broadcasterId = userInfo.UserId;
+                _logger.Log(LogLevel.Debug, $"Resolved Broadcaster ID: {broadcasterId} for username: {username}");
+            } else {
+                _logger.Log(LogLevel.Warn, $"Could not resolve username: {username}");
+            }
+
+            // The remaining part becomes the searchTerm
+            return secondPart;
         }
 
-        _logger.Log(LogLevel.Debug, $"Resolved Broadcaster ID: {userInfo.UserId} for username: {username}");
-        broadcasterId = userInfo.UserId;
+        if (!string.IsNullOrEmpty(broadcasterId)) return input;
 
-        return string.Join(" ", inputArgs);
+        // Fall back to the current broadcaster if no valid username is provided
+        var broadcaster = CPH.TwitchGetBroadcaster();
+
+        if (broadcaster == null) return input;
+
+        broadcasterId = broadcaster.UserId;
+        _logger.Log(LogLevel.Debug, $"Resolving to current broadcaster: {broadcaster.UserName}");
+
+        // If there was no username, the input is treated as the search term
+        return input;
     }
 
     /// <summary>
@@ -555,6 +576,8 @@ public class CPHInline : CPHInlineBase {
 
                 return false;
             }
+
+            if (username.StartsWith("@")) username = username.Substring(1); // Remove the leading @ symbol
 
             var clipSettings = GetClipSettings();
             var clipData = await _clipManager.GetRandomClipAsync(username, clipSettings);

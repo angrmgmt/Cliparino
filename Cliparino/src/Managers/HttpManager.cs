@@ -160,7 +160,7 @@ public class HttpManager {
 
     /// <summary>
     ///     Generates a dictionary containing headers for cache control configuration.
-    ///     (i.e. Disables caching of responses on client browsers.) 
+    ///     (i.e., Disables caching of responses on client browsers.) 
     /// </summary>
     /// <returns>
     ///     A dictionary of headers configured for cache control.

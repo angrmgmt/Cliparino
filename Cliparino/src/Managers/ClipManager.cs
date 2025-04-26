@@ -23,6 +23,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Newtonsoft.Json;
 using Streamer.bot.Common.Events;
 using Streamer.bot.Plugin.Interface;
 using Streamer.bot.Plugin.Interface.Enums;
@@ -315,65 +316,104 @@ public class ClipManager {
     }
 
     /// <summary>
-    ///     Searches for clips associated with a specified broadcaster that match a given search term. If a
-    ///     clip with a similarity score exceeding the threshold is found, returns the clip data.
+    ///     Searches for Twitch clips associated with a specific broadcaster that match a given search term.
+    ///     The search uses a similarity threshold to find the best matching clip title.
     /// </summary>
-    /// <param name="broadcasterId">
-    ///     The ID of the broadcaster whose clips are to be searched.
-    /// </param>
-    /// <param name="searchTerm">
-    ///     The term used to search for matching clips.
-    /// </param>
+    /// <param name="broadcasterId">The unique identifier of the Twitch broadcaster whose clips will be searched.
+    ///     Must not be null or empty.</param>
+    /// <param name="searchTerm">The search term to match against clip titles.
+    ///     Must not be null.</param>
     /// <returns>
-    ///     A task that represents the asynchronous operation. The task result contains the matching clip
-    ///     data if a suitable clip is found; otherwise, null.
+    ///     A <see cref="Task{ClipData}"/> that represents the asynchronous operation.
+    ///     The task result contains:
+    ///     <list type="bullet">
+    ///         <item><description>The best matching <see cref="ClipData"/> if a clip with similarity score >= 0.5 is found</description></item>
+    ///         <item><description><c>null</c> if no matching clips are found or an error occurs</description></item>
+    ///     </list>
     /// </returns>
+    /// <remarks>
+    ///     The method implements a paginated search through clips with the following behavior:
+    ///     <para>- Returns immediately if an exact match (similarity >= 0.99) is found</para>
+    ///     <para>- Searches up to 50 pages of clips before stopping</para>
+    ///     <para>- Considers matches with similarity score >= 0.5 as valid results</para>
+    ///     <para>- Caches successful matches for future use</para>
+    /// </remarks>
     public async Task<ClipData> SearchClipsWithThresholdAsync(string broadcasterId, string searchTerm) {
         _logger.Log(LogLevel.Debug,
                     $"Searching clips for broadcaster ID: {broadcasterId} using search term: '{searchTerm}'");
 
         try {
             string cursor = null;
+            var iterationCount = 0;
+            const int maxPages = 50;
+            ClipData bestMatch = null;
+            double bestMatchScore = 0;
 
             do {
-                var clipsResponse = await _twitchApiManager.FetchClipsAsync(broadcasterId, cursor);
-                var clips = clipsResponse?.Data;
+                iterationCount++;
+                _logger.Log(LogLevel.Debug, $"Fetching clips. Page: {iterationCount}, Cursor: {cursor ?? "<null>"}");
 
-                if (clips == null || clips.Length == 0) {
-                    _logger.Log(LogLevel.Warn, "No clips retrieved from Twitch API.");
+                var response = await _twitchApiManager.FetchClipsAsync(broadcasterId, cursor);
 
-                    return null;
+                if (response?.Data == null || response.Data.Length == 0) {
+                    _logger.Log(LogLevel.Debug, "No clips returned from API.");
+
+                    break;
                 }
 
+                _logger.Log(LogLevel.Debug, $"Raw pagination object: {response.Pagination}");
+                _logger.Log(LogLevel.Debug, $"Fetched {response.Data.Length} clips from Twitch API.");
+
+                // Process clips looking for matches
                 var searchWords = PreprocessText(searchTerm);
-                ClipData bestClip = null;
-                double bestScore = 0;
 
-                foreach (var clip in clips) {
+                foreach (var clip in response.Data) {
                     var clipTitleWords = PreprocessText(clip.Title);
-                    var similarityScore = ComputeWordOverlap(searchWords, clipTitleWords);
+                    var similarity = ComputeWordOverlap(searchWords, clipTitleWords);
 
-                    if (!(similarityScore > bestScore)) continue;
+                    _logger.Log(LogLevel.Debug, $"Clip '{clip.Title}': similarity score: {similarity}");
 
-                    bestScore = similarityScore;
-                    bestClip = clip;
+                    // If we find an exact match, return it immediately
+                    if (similarity >= 0.99) {
+                        _logger.Log(LogLevel.Debug, "Found exact match!");
+                        AddToCache(searchTerm, clip);
+
+                        return clip;
+                    }
+
+                    // Otherwise, keep track of the best match so far
+                    if (!(similarity > bestMatchScore)) continue;
+
+                    bestMatchScore = similarity;
+                    bestMatch = clip;
                 }
 
-                const double similarityThreshold = 0.5;
+                cursor = response.Pagination?.Cursor;
 
-                if (bestClip != null && bestScore >= similarityThreshold) {
-                    _logger.Log(LogLevel.Debug, $"Best matching clip: {bestClip.Title} with score: {bestScore}");
+                if (string.IsNullOrEmpty(cursor)) {
+                    _logger.Log(LogLevel.Debug, "No cursor provided by API for next page.");
 
-                    return bestClip;
+                    break;
                 }
 
-                cursor = clipsResponse.Pagination.Cursor;
+                _logger.Log(LogLevel.Debug, $"Next cursor: {cursor}");
 
-                if (!string.IsNullOrEmpty(cursor))
-                    _logger.Log(LogLevel.Debug, $"Continuing search with cursor: {cursor}");
-            } while (!string.IsNullOrWhiteSpace(cursor));
+                if (iterationCount < maxPages) continue;
 
-            _logger.Log(LogLevel.Warn, "No matching clip found.");
+                _logger.Log(LogLevel.Debug, "Reached maximum number of pages to search.");
+
+                break;
+            } while (true);
+
+            // If we found any decent match, return it
+            if (bestMatch != null && bestMatchScore >= 0.5) {
+                _logger.Log(LogLevel.Debug, $"Returning best match found (score: {bestMatchScore})");
+                AddToCache(searchTerm, bestMatch);
+
+                return bestMatch;
+            }
+
+            _logger.Log(LogLevel.Warn, "No matching clip found after searching all pages.");
 
             return null;
         } catch (Exception ex) {
@@ -416,9 +456,11 @@ public class ClipManager {
         if (searchWords == null || clipTitleWords == null || searchWords.Count == 0 || clipTitleWords.Count == 0)
             return 0;
 
-        var matchingWords = searchWords.Intersect(clipTitleWords).Count();
+        // For each search word, check if any clip title word contains it
+        var matchCount =
+            searchWords.Count(searchWord => clipTitleWords.Any(titleWord => titleWord.Contains(searchWord)));
 
-        return (double)matchingWords / searchWords.Count;
+        return (double)matchCount / searchWords.Count;
     }
 
     /// <summary>
@@ -449,7 +491,7 @@ public class ClipManager {
     /// <param name="clipData">
     ///     The clip data to be added to the cache.
     /// </param>
-    public void AddToCache(string searchTerm, ClipData clipData) {
+    private void AddToCache(string searchTerm, ClipData clipData) {
         ClipCache[searchTerm] =
             new CachedClipData { Clip = clipData, SearchFrequency = 1, LastAccessed = DateTime.UtcNow };
 
@@ -489,23 +531,27 @@ public class ClipManager {
     ///     Represents a response object containing clips and associated pagination data.
     /// </summary>
     public class ClipsResponse {
-        /// <summary>
-        ///     Represents a response containing clips and associated pagination information.
-        /// </summary>
+        public ClipsResponse() {
+            Data = Array.Empty<ClipData>();
+            Pagination = new PaginationObject();
+        }
+
         public ClipsResponse(ClipData[] data = null, string cursor = "") {
             Data = data ?? Array.Empty<ClipData>();
             Pagination = new PaginationObject(cursor);
         }
 
         /// <summary>
-        ///     Represents data associated with a clip.
+        ///     Represents a list of clip data objects fetched from the Twitch API.
         /// </summary>
-        public ClipData[] Data { get; }
+        [JsonProperty("data")]
+        public ClipData[] Data { get; set; }
 
         /// <summary>
         ///     Represents pagination information for navigating through a collection of data.
         /// </summary>
-        public PaginationObject Pagination { get; }
+        [JsonProperty("pagination")]
+        public PaginationObject Pagination { get; set; }
     }
 
     /// <summary>
@@ -524,7 +570,18 @@ public class ClipManager {
         ///     Represents pagination information used to retrieve the next set of data in a paginated API
         ///     response.
         /// </summary>
-        public string Cursor { get; }
+        [JsonProperty("cursor")]
+        public string Cursor { get; set; }
+
+        /// <summary>
+        ///     Returns a string representation of the pagination object in JSON format.
+        /// </summary>
+        /// <returns>
+        ///     A JSON-formatted string representing the pagination object.
+        /// </returns>
+        public override string ToString() {
+            return JsonConvert.SerializeObject(this);
+        }
     }
 
     /// <summary>

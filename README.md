@@ -41,6 +41,8 @@ and even goes a bit further, allowing you to:
   Omitting the broadcaster's name will search your channel's clips.
   By default, this is gated by moderator approval.
   The terms available to approve or deny are pretty exhaustive, so it should be as intuitive as answering naturally.
+
+  **Important:** *You ***must*** use the `@` symbol before the username with this version of the command.*
 - If multiple clips are enqueued by sequential commands in chat, they will play in order.
 - Shoutouts also have their own queue and will play in the order they are received.
 
@@ -70,8 +72,9 @@ and even goes a bit further, allowing you to:
     - The scene and player screen dimensions, default value of 1920x1080. Users can select whatever (width)x(height)
       they want, and the player will auto-adjust to 16:9, leaving horizontal or vertical black bars as needed.
     - Logging for debugging purposes. This will log all clip playback events to a file in the Streamer Bot Log folder.
-    - A message to be sent to chat while performing a shoutout, with a link to their Twitch channel. This can be
-      disabled by setting its value to `""`.
+  - A message to be sent to chat while performing a shoutout, with a link to their Twitch channel.
+    This can be edited if the message isn't to your liking.
+    Alternatively, It can be ~~~~disabled by setting its value to `""`.
     - A toggle for featured clips to be played during shoutouts. If disabled, any clip from the user's channel will be
       played.
     - The max length of clip to play in seconds during shoutouts, defaulting to 30 seconds. Clips longer than this will
