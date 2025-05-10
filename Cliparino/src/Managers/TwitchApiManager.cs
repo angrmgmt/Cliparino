@@ -21,7 +21,10 @@
 
 using System;
 using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Streamer.bot.Common.Events;
@@ -253,6 +256,27 @@ public class TwitchApiManager {
         }
     }
 
+    public async Task<GameData> GetGameDataAsync(string gameId) {
+        try {
+            var endpoint = $"games?id={gameId}";
+            var content = await SendHttpRequestAsync(endpoint);
+
+            if (string.IsNullOrEmpty(content)) {
+                _logger.Log(LogLevel.Error, $"Failed to retrieve game data for ID: {gameId}");
+
+                return null;
+            }
+
+            var response = JsonConvert.DeserializeObject<GameResponse>(content);
+
+            return response?.Data?.FirstOrDefault();
+        } catch (Exception ex) {
+            _logger.Log(LogLevel.Error, $"Error retrieving game data for ID: {gameId}", ex);
+
+            return null;
+        }
+    }
+
     /// <summary>
     ///     Validates that the given API endpoint is not null or empty.
     /// </summary>
@@ -357,6 +381,9 @@ public class TwitchApiManager {
     /// <param name="endpoint">
     ///     The endpoint to which the HTTP GET request will be made.
     /// </param>
+    /// <param name="maxRetries">
+    ///     The maximum number of retries allowed before throwing an exception.
+    /// </param>
     /// <returns>
     ///     A <see cref="Task{TResult}" /> representing the response content as a <see cref="string" />.
     /// </returns>
@@ -367,132 +394,188 @@ public class TwitchApiManager {
     ///     Logs detailed information about the headers, response, and errors encountered during the
     ///     request.
     /// </remarks>
-    private async Task<string> SendHttpRequestAsync(string endpoint) {
-        try {
-            ConfigureHttpRequestHeaders();
+    private async Task<string> SendHttpRequestAsync(string endpoint, int maxRetries = 1) {
+        const int timeoutSeconds = 30;
+        const string baseUrl = "https://api.twitch.tv/helix/";
 
-            foreach (var header in HTTPManager.Client.DefaultRequestHeaders)
-                _logger.Log(LogLevel.Debug,
-                            header.Key == "Authorization"
-                                ? $"Header: {header.Key}: {string.Join(",", OAuthInfo.ObfuscateString(_oauthInfo.TwitchOAuthToken))}"
-                                : $"Header: {header.Key}: {string.Join(",", header.Value)}");
+        using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds))) {
+            var completeUrl = endpoint.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                                  ? endpoint
+                                  : $"{baseUrl}{endpoint}";
 
-            _logger.Log(LogLevel.Debug, "HTTP headers set successfully. Initiating request...");
+            for (var attempt = 0; attempt <= maxRetries; attempt++)
+                try {
+                    ConfigureHttpRequestHeaders();
+                    LogRequestHeaders();
 
-            var response = await HTTPManager.Client.GetAsync(endpoint);
-            var responseBody = await response.Content.ReadAsStringAsync();
+                    _logger.Log(LogLevel.Debug, $"Making request to Twitch API: {endpoint}");
 
-            _logger.Log(LogLevel.Debug,
-                        $"Received response: {response.StatusCode} ({(int)response.StatusCode})\nContent: {responseBody}");
+                    using (var request = new HttpRequestMessage(HttpMethod.Get, completeUrl)) {
+                        using (var response = await HTTPManager.Client.SendAsync(request, cts.Token)) {
+                            var responseBody = await response.Content.ReadAsStringAsync();
 
-            if (response.IsSuccessStatusCode) return responseBody;
+                            _logger.Log(LogLevel.Debug,
+                                        $"Received response: {response.StatusCode} ({(int)response.StatusCode})\nContent: {responseBody}");
 
-            _logger.Log(LogLevel.Error,
-                        $"Request to Twitch API failed: {response.ReasonPhrase} (Status Code: {(int)response.StatusCode}, URL: {endpoint})");
+                            if (response.IsSuccessStatusCode) return responseBody;
 
-            throw new
-                HttpRequestException($"Request to Twitch API failed: {response.ReasonPhrase} (Status Code: {(int)response.StatusCode})");
-        } catch (HttpRequestException ex) {
-            _logger.Log(LogLevel.Error, $"HTTP request error while calling {endpoint}.", ex);
+                            // Handle specific status codes
+                            if (!await HandleErrorStatusCode(response,
+                                                             responseBody,
+                                                             attempt,
+                                                             maxRetries,
+                                                             endpoint,
+                                                             cts.Token))
+                                break;
+                        }
+                    }
+                } catch (TaskCanceledException ex) {
+                    _logger.Log(LogLevel.Error,
+                                $"Request timed out while calling {endpoint}. Attempt {attempt + 1} of {maxRetries + 1}",
+                                ex);
+
+                    if (attempt == maxRetries) return null;
+                } catch (HttpRequestException ex) {
+                    _logger.Log(LogLevel.Error,
+                                $"HTTP request error while calling {endpoint}. Attempt {attempt + 1} of {maxRetries + 1}",
+                                ex);
+
+                    if (attempt == maxRetries) return null;
+                } catch (OperationCanceledException ex) {
+                    _logger.Log(LogLevel.Error,
+                                $"Operation was canceled while calling {endpoint}. Attempt {attempt + 1} of {maxRetries + 1}",
+                                ex);
+
+                    if (attempt == maxRetries) return null;
+                }
 
             return null;
         }
     }
 
-    /// <summary>
-    ///     Represents the OAuth information required for authentication with the Twitch API.
-    /// </summary>
-    private class OAuthInfo {
-        public OAuthInfo(string twitchClientId, string twitchOAuthToken) {
-            TwitchClientId = twitchClientId
-                             ?? throw new ArgumentNullException(nameof(twitchClientId), "Client ID cannot be null.");
-            TwitchOAuthToken = twitchOAuthToken
-                               ?? throw new ArgumentNullException(nameof(twitchOAuthToken),
-                                                                  "OAuth token cannot be null.");
+    private void LogRequestHeaders() {
+        foreach (var header in HTTPManager.Client.DefaultRequestHeaders)
+            _logger.Log(LogLevel.Debug,
+                        header.Key == "Authorization"
+                            ? $"Header: {header.Key}: {string.Join(",", OAuthInfo.ObfuscateString(_oauthInfo.TwitchOAuthToken))}"
+                            : $"Header: {header.Key}: {string.Join(",", header.Value)}");
+    }
+
+    private async Task<bool> HandleErrorStatusCode(HttpResponseMessage response,
+                                                   string responseBody,
+                                                   int attempt,
+                                                   int maxRetries,
+                                                   string endpoint,
+                                                   CancellationToken token) {
+        const int defaultRetryDelaySeconds = 5;
+
+        switch ((int)response.StatusCode) {
+            case 401: // Unauthorized
+                if (attempt == maxRetries) return false;
+
+                _logger.Log(LogLevel.Debug, "Received 401, attempting to refresh token...");
+                _oauthInfo.TwitchOAuthToken = _cph.TwitchOAuthToken; // Refresh token through Streamer.bot
+
+                return true;
+
+            case 429: // Too Many Requests
+                if (attempt == maxRetries) return false;
+
+                var retryAfter = response.Headers.RetryAfter;
+
+                await Task.Delay(retryAfter?.Delta ?? TimeSpan.FromSeconds(defaultRetryDelaySeconds), token);
+
+                return true;
         }
 
-        /// <summary>
-        ///     Gets the Twitch Client ID.
-        /// </summary>
-        public string TwitchClientId { get; }
+        _logger.Log(LogLevel.Error,
+                    $"Request to Twitch API failed: {response.ReasonPhrase} (Status Code: {(int)response.StatusCode}, URL: {endpoint})");
+        _logger.Log(LogLevel.Debug, $"Response content: {responseBody}");
 
-        /// <summary>
-        ///     Gets the Twitch OAuth token.
-        /// </summary>
-        public string TwitchOAuthToken { get; }
+        if (attempt == maxRetries)
+            throw new
+                HttpRequestException($"Request to Twitch API failed: {response.ReasonPhrase} (Status Code: {(int)response.StatusCode})");
 
-        /// <summary>
-        ///     Returns a string representation of the OAuth information, with the OAuth token obfuscated.
-        /// </summary>
-        /// <returns>
-        ///     A <see cref="string" /> representing the obfuscated OAuth information.
-        /// </returns>
-        public override string ToString() {
-            return $"Client ID: {TwitchClientId}, OAuth Token: {ObfuscateString(TwitchOAuthToken)}";
-        }
+        return false;
+    }
+}
 
-        /// <summary>
-        ///     Obfuscates a given string for security purposes.
-        /// </summary>
-        /// <param name="input">
-        ///     The string to obfuscate.
-        /// </param>
-        /// <returns>
-        ///     A <see cref="string" /> with the middle portion obfuscated or empty if the input is null or
-        ///     empty.
-        /// </returns>
-        public static string ObfuscateString(string input) {
-            if (string.IsNullOrEmpty(input)) return string.Empty;
-
-            const string obfuscationSymbol = "...";
-
-            var visibleLength = Math.Max(1, input.Length / 3);
-            var prefixLength = visibleLength / 2;
-            var suffixLength = visibleLength - prefixLength;
-
-            return input.Length <= visibleLength + obfuscationSymbol.Length
-                       ? obfuscationSymbol
-                       : $"{input.Substring(0, prefixLength)}{obfuscationSymbol}{input.Substring(input.Length - suffixLength)}";
-        }
+public class OAuthInfo {
+    public OAuthInfo(string twitchClientId, string twitchOAuthToken) {
+        TwitchClientId = twitchClientId
+                         ?? throw new ArgumentNullException(nameof(twitchClientId), "Client ID cannot be null.");
+        TwitchOAuthToken = twitchOAuthToken
+                           ?? throw new ArgumentNullException(nameof(twitchOAuthToken), "OAuth token cannot be null.");
     }
 
     /// <summary>
-    ///     Represents a response from the Twitch API with a data object of type <typeparamref name="T" />.
+    ///     Gets the Twitch Client ID.
     /// </summary>
-    /// <typeparam name="T">
-    ///     The type of object contained in the data property of the response.
-    /// </typeparam>
-    public class TwitchApiResponse<T> {
-        public TwitchApiResponse(T[] data) {
-            Data = data ?? Array.Empty<T>();
-        }
+    public string TwitchClientId { get; set; }
 
-        /// <summary>
-        ///     Gets the data retrieved from the Twitch API response.
-        /// </summary>
-        public T[] Data { get; }
+    /// <summary>
+    ///     Gets the Twitch OAuth token.
+    /// </summary>
+    public string TwitchOAuthToken { get; set; }
+
+    /// <summary>
+    ///     Returns a string representation of the OAuth information, with the OAuth token obfuscated.
+    /// </summary>
+    /// <returns>
+    ///     A <see cref="string" /> representing the obfuscated OAuth information.
+    /// </returns>
+    public override string ToString() {
+        return $"Client ID: {TwitchClientId}, OAuth Token: {ObfuscateString(TwitchOAuthToken)}";
     }
 
     /// <summary>
-    ///     Represents a game data object retrieved from the Twitch API.
+    ///     Obfuscates a given string for security purposes.
     /// </summary>
-    public class GameData {
-        /// <summary>
-        ///     Gets or sets the URL of the game's box art.
-        /// </summary>
-        [JsonProperty("box_art_url")]
-        public string BoxArtUrl { get; set; }
+    /// <param name="input">
+    ///     The string to obfuscate.
+    /// </param>
+    /// <returns>
+    ///     A <see cref="string" /> with the middle portion obfuscated or empty if the input is null or
+    ///     empty.
+    /// </returns>
+    public static string ObfuscateString(string input) {
+        if (string.IsNullOrEmpty(input)) return string.Empty;
 
-        /// <summary>
-        ///     Gets or sets the ID of the game.
-        /// </summary>
-        [JsonProperty("id")]
-        public string Id { get; set; }
+        const string obfuscationSymbol = "...";
 
-        /// <summary>
-        ///     Gets or sets the name of the game.
-        /// </summary>
-        [JsonProperty("name")]
-        public string Name { get; set; }
+        var visibleLength = Math.Max(1, input.Length / 3);
+        var prefixLength = visibleLength / 2;
+        var suffixLength = visibleLength - prefixLength;
+
+        return input.Length <= visibleLength + obfuscationSymbol.Length
+                   ? obfuscationSymbol
+                   : $"{input.Substring(0, prefixLength)}{obfuscationSymbol}{input.Substring(input.Length - suffixLength)}";
     }
+}
+
+/// <summary>
+///     Represents a response from the Twitch API with a data object of type <typeparamref name="T" />.
+/// </summary>
+/// <typeparam name="T">
+///     The type of object contained in the data property of the response.
+/// </typeparam>
+public class TwitchApiResponse<T> {
+    public TwitchApiResponse(T[] data) {
+        Data = data ?? Array.Empty<T>();
+    }
+
+    /// <summary>
+    ///     Gets the data retrieved from the Twitch API response.
+    /// </summary>
+    public T[] Data { get; }
+}
+
+public class GameResponse {
+    [JsonProperty("data")] public List<GameData> Data { get; set; }
+}
+
+public class GameData {
+    [JsonProperty("id")] public string Id { get; set; }
+    [JsonProperty("name")] public string Name { get; set; }
+    [JsonProperty("box_art_url")] public string BoxArtUrl { get; set; }
 }

@@ -160,7 +160,7 @@ public class HttpManager {
 
     /// <summary>
     ///     Generates a dictionary containing headers for cache control configuration.
-    ///     (i.e., Disables caching of responses on client browsers.) 
+    ///     (i.e., Disables caching of responses on client browsers.)
     /// </summary>
     /// <returns>
     ///     A dictionary of headers configured for cache control.
@@ -333,6 +333,9 @@ public class HttpManager {
     /// <param name="nonce">
     ///     A unique string used to ensure secure communication in the prepared page.
     /// </param>
+    /// <param name="clipData">
+    ///     An object containing information about the clip to be displayed on the page.
+    /// </param>
     /// <returns>
     ///     A string containing the prepared HTML page with relevant clip and game data inserted.
     /// </returns>
@@ -342,25 +345,38 @@ public class HttpManager {
     /// <exception cref="InvalidOperationException">
     ///     Thrown when either clip data is null or the game name is null/empty.
     /// </exception>
-    private async Task<string> PreparePage(string nonce) {
-        if (string.IsNullOrWhiteSpace(nonce))
-            throw new ArgumentNullException(nameof(nonce), "Nonce cannot be null or empty.");
+    private async Task<string> PreparePage(string nonce = null, ClipData clipData = null) {
+        try {
+            // Validate input based on which mode we're in
+            if (clipData != null)
+                _clipData = clipData; // Store for consistency with existing implementation
+            else if (_clipData == null) throw new InvalidOperationException("Clip data cannot be null.");
 
-        if (_clipData == null) throw new InvalidOperationException("Clip data cannot be null.");
+            if (string.IsNullOrWhiteSpace(nonce))
+                throw new ArgumentNullException(nameof(nonce), "Nonce cannot be null or empty.");
 
-        var gameName = (await _twitchApiManager.FetchGameById(_clipData.GameId)).Name;
+            // Fetch game data with fallback handling
+            var gameData = await _twitchApiManager.GetGameDataAsync(_clipData.GameId);
+            var gameName = gameData?.Name;
 
-        if (string.IsNullOrWhiteSpace(gameName))
-            throw new InvalidOperationException("Game name cannot be null or empty.");
+            if (string.IsNullOrWhiteSpace(gameName)) {
+                gameName = "Unknown Game";
+                _logger.Log(LogLevel.Warn, $"Could not fetch game name for game ID {_clipData.GameId}");
+            }
 
-        _logger.Log(LogLevel.Debug, $"Preparing page for clip '{_clipData.Id}'...");
+            _logger.Log(LogLevel.Debug, $"Preparing page for clip '{_clipData.Id}'...");
 
-        return HTMLText.Replace("[[clipId]]", _clipData.Id)
-                       .Replace("[[nonce]]", nonce)
-                       .Replace("[[streamerName]]", _clipData.BroadcasterName)
-                       .Replace("[[gameName]]", gameName)
-                       .Replace("[[clipTitle]]", _clipData.Title)
-                       .Replace("[[curatorName]]", _clipData.CreatorName);
+            return HTMLText.Replace("[[clipId]]", _clipData.Id)
+                           .Replace("[[nonce]]", nonce)
+                           .Replace("[[streamerName]]", _clipData.BroadcasterName)
+                           .Replace("[[gameName]]", gameName)
+                           .Replace("[[clipTitle]]", _clipData.Title)
+                           .Replace("[[curatorName]]", _clipData.CreatorName);
+        } catch (Exception ex) {
+            _logger.Log(LogLevel.Error, "Error while preparing page", ex);
+
+            throw; // Maintain the exception chain for higher-level handling
+        }
     }
 
     /// <summary>
