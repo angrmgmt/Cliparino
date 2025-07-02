@@ -1,4 +1,4 @@
-﻿/*  Cliparino is a clip player for Twitch.tv built to work with Streamer.bot.
+/*  Cliparino is a clip player for Twitch.tv built to work with Streamer.bot.
     Copyright (C) 2024 Scott Mongrain - (angrmgmt@gmail.com)
 
     This library is free software; you can redistribute it and/or
@@ -474,10 +474,33 @@ public class TwitchApiManager {
                 if (attempt == maxRetries) return false;
 
                 _logger.Log(LogLevel.Debug, "Received 401, attempting to refresh token...");
-                _oauthInfo.TwitchOAuthToken = _cph.TwitchOAuthToken; // Refresh token through Streamer.bot
+
+                // Force Streamer Bot to refresh the token by making it perform a Twitch API call
+                var refreshSuccess = await TriggerStreamerBotTokenRefresh();
+
+                if (!refreshSuccess) {
+                    _logger.Log(LogLevel.Error, "Failed to trigger token refresh through Streamer Bot.");
+
+                    return false;
+                }
+
+                var newToken = _cph.TwitchOAuthToken;
+
+                if (newToken == _oauthInfo.TwitchOAuthToken) {
+                    _logger.Log(LogLevel.Warn,
+                                "Refreshed token is identical to current token - refresh may have failed or token may still be valid.");
+
+                    return false;
+                }
+
+                var oldTokenObfuscated = OAuthInfo.ObfuscateString(_oauthInfo.TwitchOAuthToken);
+                var newTokenObfuscated = OAuthInfo.ObfuscateString(newToken);
+
+                _oauthInfo.TwitchOAuthToken = newToken;
+                _logger.Log(LogLevel.Info,
+                            $"Token has been refreshed successfully. Old: {oldTokenObfuscated} -> New: {newTokenObfuscated}");
 
                 return true;
-
             case 429: // Too Many Requests
                 if (attempt == maxRetries) return false;
 
@@ -495,6 +518,131 @@ public class TwitchApiManager {
         if (attempt == maxRetries)
             throw new
                 HttpRequestException($"Request to Twitch API failed: {response.ReasonPhrase} (Status Code: {(int)response.StatusCode})");
+
+        return false;
+    }
+
+    /// <summary>
+    ///     Triggers Streamer Bot to refresh its Twitch OAuth token by forcing it to make a Twitch API
+    ///     call.
+    /// </summary>
+    /// <returns>
+    ///     A task that represents the asynchronous operation. The task result is <c>true</c> if the token
+    ///     refresh was triggered successfully; otherwise, <c>
+    ///         false
+    ///     </c>.
+    /// </returns>
+    /// <remarks>
+    ///     This method forces Streamer Bot to make a Twitch API call, which will cause it to automatically
+    ///     refresh the OAuth token if it's expired. We try multiple approaches to ensure a successful
+    ///     trigger.
+    /// </remarks>
+    private async Task<bool> TriggerStreamerBotTokenRefresh() {
+        try {
+            _logger.Log(LogLevel.Debug, "Attempting to trigger Streamer Bot token refresh...");
+
+            // Strategy 1: Try to get broadcaster info using common broadcaster usernames or fallback
+            var triggerSuccess = await TryTriggerRefreshWithApiCall();
+
+            if (triggerSuccess) {
+                _logger.Log(LogLevel.Debug, "Successfully triggered Streamer Bot API call for token refresh.");
+
+                // Give Streamer Bot a moment to process the token refresh
+                await Task.Delay(TimeSpan.FromMilliseconds(500));
+
+                return true;
+            }
+
+            _logger.Log(LogLevel.Warn, "All token refresh trigger attempts failed.");
+
+            return false;
+        } catch (Exception ex) {
+            _logger.Log(LogLevel.Error, "Failed to trigger Streamer Bot token refresh.", ex);
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    ///     Manually triggers a token refresh for testing and diagnostic purposes.
+    /// </summary>
+    /// <returns>
+    ///     A task that represents the asynchronous operation. The task result is <c>true</c> if the token
+    ///     was refreshed successfully; otherwise, <c>
+    ///         false
+    ///     </c>.
+    /// </returns>
+    /// <remarks>
+    ///     This method can be called manually to test the token refresh mechanism or to preemptively
+    ///     refresh the token before making critical API calls.
+    /// </remarks>
+    public async Task<bool> RefreshTokenAsync() {
+        _logger.Log(LogLevel.Info, "Manual token refresh requested.");
+
+        var currentToken = _oauthInfo.TwitchOAuthToken;
+        var refreshSuccess = await TriggerStreamerBotTokenRefresh();
+
+        if (!refreshSuccess) {
+            _logger.Log(LogLevel.Error, "Manual token refresh failed to trigger Streamer Bot refresh.");
+
+            return false;
+        }
+
+        var newToken = _cph.TwitchOAuthToken;
+
+        if (newToken == currentToken) {
+            _logger.Log(LogLevel.Info, "Manual token refresh completed - token was already current.");
+
+            return true; // This is actually success - the token was already valid
+        }
+
+        _oauthInfo.TwitchOAuthToken = newToken;
+        _logger.Log(LogLevel.Info,
+                    $"Manual token refresh successful. Token updated from {OAuthInfo.ObfuscateString(currentToken)} to {OAuthInfo.ObfuscateString(newToken)}");
+
+        return true;
+    }
+
+    /// <summary>
+    ///     Attempts to trigger a token refresh by making Streamer Bot perform a Twitch API call.
+    /// </summary>
+    /// <returns>
+    ///     <c>true</c> if at least one API call was successful; otherwise, <c>
+    ///         false
+    ///     </c>.
+    /// </returns>
+    private async Task<bool> TryTriggerRefreshWithApiCall() {
+        // Try to derive broadcaster username from the client context
+        // This is a heuristic approach - in most cases, Streamer Bot runs for the broadcaster
+        try {
+            // Strategy 1: Try to use a well-known Twitch username that's likely to exist
+            // and won't cause issues (like 'twitch' - the official Twitch account)
+            var testUser = await Task.Run(() => _cph.TwitchGetExtendedUserInfoByLogin("twitch"));
+
+            if (testUser != null) {
+                _logger.Log(LogLevel.Debug, "Token refresh triggered using test user lookup.");
+
+                return true;
+            }
+        } catch (Exception ex) {
+            _logger.Log(LogLevel.Debug, $"Test user lookup failed: {ex.Message}");
+        }
+
+        // Strategy 2: If we can't use a test user, try to trigger any other Twitch API method
+        // that might cause token refresh - this is a fallback approach
+        try {
+            // Use the existing shoutout functionality, but with a no-op approach
+            // We'll attempt to get user info for a known invalid user to trigger the API call
+            // without actually affecting anything
+            _ = await Task.Run(() => _cph.TwitchGetExtendedUserInfoByLogin("__cliparino_token_refresh_trigger__"));
+
+            // This call will likely return null, but it will trigger Streamer Bot to make a Twitch API call
+            _logger.Log(LogLevel.Debug, "Token refresh triggered using fallback method.");
+
+            return true;
+        } catch (Exception ex) {
+            _logger.Log(LogLevel.Debug, $"Fallback token refresh trigger failed: {ex.Message}");
+        }
 
         return false;
     }

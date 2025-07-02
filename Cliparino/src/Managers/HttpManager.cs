@@ -121,6 +121,45 @@ public class HttpManager {
             </div>
         </div>
     </div>
+    <script>
+        const observer = new MutationObserver((mutations) => {
+            const iframe = document.getElementById('clip-iframe');
+            if (!iframe || !iframe.contentWindow) return;
+
+            try {
+                const iframeDoc = iframe.contentWindow.document;
+                const warningOverlay = iframeDoc.querySelector('.content-warning-overlay');
+                if (warningOverlay) {
+                    console.log('[Cliparino] Content warning detected');
+                    
+                    const watchButton = iframeDoc.querySelector('button[data-a-target=""content-classification-gate-overlay-close""]');
+                    if (watchButton) {
+                        console.log('[Cliparino] Attempting to bypass content warning');
+                        watchButton.click();
+                    }
+                }
+            } catch (e) {
+                // Silent catch for cross-origin frame access
+            }
+        });
+
+        // Start observing once the iframe loads
+        document.getElementById('clip-iframe').addEventListener('load', () => {
+            const config = { 
+                childList: true, 
+                subtree: true 
+            };
+            
+            try {
+                const iframe = document.getElementById('clip-iframe');
+                if (iframe.contentWindow && iframe.contentWindow.document) {
+                    observer.observe(iframe.contentWindow.document.body, config);
+                }
+            } catch (e) {
+                // Silent catch for cross-origin frame access
+            }
+        });
+    </script>
     </body>
     </html>
     ";
