@@ -20,6 +20,8 @@
 #region
 
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -38,14 +40,15 @@ using Twitch.Common.Models.Api;
 public class ObsSceneManager {
     private const string CliparinoSourceName = "Cliparino";
     private const string PlayerSourceName = "Player";
-    private const string ActiveUrl = "http://localhost:8080/";
     private const string InactiveUrl = "about:blank";
     private readonly IInlineInvokeProxy _cph;
+    private readonly HttpManager _httpManager;
     private readonly CPHLogger _logger;
 
-    public ObsSceneManager(IInlineInvokeProxy cph, CPHLogger logger) {
+    public ObsSceneManager(IInlineInvokeProxy cph, CPHLogger logger, HttpManager httpManager) {
         _cph = cph ?? throw new ArgumentNullException(nameof(cph));
         _logger = logger;
+        _httpManager = httpManager ?? throw new ArgumentNullException(nameof(httpManager));
     }
 
     /// <summary>
@@ -60,17 +63,17 @@ public class ObsSceneManager {
     ///     The data of the clip to be played, including its URL and title.
     /// </param>
     /// <returns>
-    ///     A task that represents the asynchronous operation.
+    ///     A task that represents the asynchronous operation, with a boolean indicating success.
     /// </returns>
     /// <remarks>
     ///     If the clip data or the current OBS scene is not available, an error is logged and no action is
     ///     taken.
     /// </remarks>
-    public async Task PlayClipAsync(ClipData clipData) {
+    public async Task<bool> PlayClipAsync(ClipData clipData) {
         if (clipData == null) {
             _logger.Log(LogLevel.Error, "No clip data provided.");
 
-            return;
+            return false;
         }
 
         var scene = CurrentScene();
@@ -78,30 +81,75 @@ public class ObsSceneManager {
         if (string.IsNullOrWhiteSpace(scene)) {
             _logger.Log(LogLevel.Error, "Unable to determine current OBS scene.");
 
-            return;
+            return false;
         }
 
         _logger.Log(LogLevel.Info, $"Playing clip '{clipData.Title}' ({clipData.Url}).");
-        SetUpCliparino();
-        ShowCliparino(scene);
 
-        await SetBrowserSourceAsync(ActiveUrl);
+        var setupSuccess = SetUpCliparino();
+
+        if (!setupSuccess) {
+            _logger.Log(LogLevel.Error, "Failed to set up Cliparino. Cannot play clip.");
+
+            return false;
+        }
+
+        var showSuccess = ShowCliparino(scene);
+
+        if (!showSuccess) {
+            _logger.Log(LogLevel.Error, "Failed to show Cliparino in OBS. Cannot play clip.");
+
+            return false;
+        }
+
+        var browserSourceSuccess = await SetBrowserSourceAsync(_httpManager.ServerUrl);
+
+        if (!browserSourceSuccess) {
+            _logger.Log(LogLevel.Error, "Failed to set browser source URL. Clip will not play properly.");
+
+            return false;
+        }
+
         await LogPlayerState();
+        _logger.Log(LogLevel.Info, $"Successfully initiated playback of clip '{clipData.Title}'.");
+
+        return true;
     }
 
     /// <summary>
     ///     Stops the currently playing clip and hides the Cliparino player in OBS.
     /// </summary>
     /// <returns>
-    ///     A task that represents the asynchronous operation.
+    ///     A task that represents the asynchronous operation, with a boolean indicating success.
     /// </returns>
-    public async Task StopClip() {
+    public async Task<bool> StopClip() {
         _logger.Log(LogLevel.Info, "Stopping clip playback.");
 
-        await LogPlayerState();
-        await SetBrowserSourceAsync(InactiveUrl);
+        try {
+            await LogPlayerState();
 
-        HideCliparino(CurrentScene());
+            var browserSourceSuccess = await SetBrowserSourceAsync(InactiveUrl);
+
+            if (!browserSourceSuccess)
+                _logger.Log(LogLevel.Error, "Failed to clear browser source URL when stopping clip.");
+
+            var hideSuccess = HideCliparino(CurrentScene());
+
+            if (!hideSuccess) _logger.Log(LogLevel.Error, "Failed to hide Cliparino when stopping clip.");
+
+            var overallSuccess = browserSourceSuccess && hideSuccess;
+
+            if (overallSuccess)
+                _logger.Log(LogLevel.Info, "Successfully stopped clip playback.");
+            else
+                _logger.Log(LogLevel.Warn, "Clip playback stopped with some issues.");
+
+            return overallSuccess;
+        } catch (Exception ex) {
+            _logger.Log(LogLevel.Error, "Error stopping clip playback.", ex);
+
+            return false;
+        }
     }
 
     /// <summary>
@@ -127,27 +175,62 @@ public class ObsSceneManager {
     ///     The URL string of the player if found; otherwise, a message indicating no URL was found.
     /// </returns>
     private string GetPlayerUrl() {
-        var playerUrl = GetPlayerSettings()?["inputSettings"]?["url"]?.ToString();
+        try {
+            var playerSettings = GetPlayerSettings();
 
-        _logger.Log(LogLevel.Debug, $"Player URL: {playerUrl}");
+            if (playerSettings == null) {
+                _logger.Log(LogLevel.Error, "Failed to retrieve player settings.");
 
-        return playerUrl ?? "Error: No URL found.";
+                return "Error: Failed to retrieve player settings.";
+            }
+
+            var playerUrl = playerSettings["inputSettings"]?["url"]?.ToString();
+
+            if (string.IsNullOrWhiteSpace(playerUrl)) {
+                _logger.Log(LogLevel.Warn, "Player URL is empty or not found in settings.");
+
+                return "Error: No URL found in player settings.";
+            }
+
+            _logger.Log(LogLevel.Debug, $"Player URL: {playerUrl}");
+
+            return playerUrl;
+        } catch (Exception ex) {
+            _logger.Log(LogLevel.Error, "Error retrieving player URL.", ex);
+
+            return "Error: Exception occurred while retrieving URL.";
+        }
     }
 
     /// <summary>
     ///     Retrieves the settings of the Cliparino player source in OBS.
     /// </summary>
     /// <returns>
-    ///     A JSON object representing the player settings.
+    ///     A JSON object representing the player settings, or null if the operation failed.
     /// </returns>
     private JObject GetPlayerSettings() {
-        var payload = new Payload {
-            RequestType = "GetInputSettings", RequestData = new { inputName = PlayerSourceName }
-        };
+        try {
+            var payload = new Payload {
+                RequestType = "GetInputSettings", RequestData = new { inputName = PlayerSourceName }
+            };
 
-        return JsonConvert.DeserializeObject<JObject>(_cph.ObsSendRaw(payload.RequestType,
-                                                                      JsonConvert
-                                                                          .SerializeObject(payload.RequestData)));
+            var response = _cph.ObsSendRaw(payload.RequestType, JsonConvert.SerializeObject(payload.RequestData));
+
+            if (!ValidateObsOperation("GetInputSettings", response, $"get settings for input '{PlayerSourceName}'")) {
+                _logger.Log(LogLevel.Error, $"Failed to get settings for Player source '{PlayerSourceName}'.");
+
+                return null;
+            }
+
+            var settings = JsonConvert.DeserializeObject<JObject>(response);
+            _logger.Log(LogLevel.Debug, $"Successfully retrieved settings for Player source '{PlayerSourceName}'.");
+
+            return settings;
+        } catch (Exception ex) {
+            _logger.Log(LogLevel.Error, $"Error retrieving settings for Player source '{PlayerSourceName}'.", ex);
+
+            return null;
+        }
     }
 
     /// <summary>
@@ -170,15 +253,50 @@ public class ObsSceneManager {
     /// <param name="scene">
     ///     The name of the scene where the Cliparino source should be shown.
     /// </param>
-    private void ShowCliparino(string scene) {
+    /// <returns>
+    ///     True if the sources were successfully made visible, otherwise false.
+    /// </returns>
+    private bool ShowCliparino(string scene) {
         try {
-            if (!_cph.ObsIsSourceVisible(scene, CliparinoSourceName))
+            _logger.Log(LogLevel.Debug, $"Showing Cliparino sources in scene '{scene}'.");
+
+            if (!_cph.ObsIsSourceVisible(scene, CliparinoSourceName)) {
+                _logger.Log(LogLevel.Debug, $"Making '{CliparinoSourceName}' visible in scene '{scene}'.");
                 _cph.ObsSetSourceVisibility(scene, CliparinoSourceName, true);
 
-            if (!_cph.ObsIsSourceVisible(CliparinoSourceName, PlayerSourceName))
+                // Verify the operation was successful
+                if (!_cph.ObsIsSourceVisible(scene, CliparinoSourceName)) {
+                    _logger.Log(LogLevel.Error, $"Failed to make '{CliparinoSourceName}' visible in scene '{scene}'.");
+
+                    return false;
+                }
+
+                _logger.Log(LogLevel.Debug, $"Successfully made '{CliparinoSourceName}' visible in scene '{scene}'.");
+            }
+
+            if (!_cph.ObsIsSourceVisible(CliparinoSourceName, PlayerSourceName)) {
+                _logger.Log(LogLevel.Debug, $"Making '{PlayerSourceName}' visible in '{CliparinoSourceName}'.");
                 _cph.ObsSetSourceVisibility(CliparinoSourceName, PlayerSourceName, true);
+
+                // Verify the operation was successful
+                if (!_cph.ObsIsSourceVisible(CliparinoSourceName, PlayerSourceName)) {
+                    _logger.Log(LogLevel.Error,
+                                $"Failed to make '{PlayerSourceName}' visible in '{CliparinoSourceName}'.");
+
+                    return false;
+                }
+
+                _logger.Log(LogLevel.Debug,
+                            $"Successfully made '{PlayerSourceName}' visible in '{CliparinoSourceName}'.");
+            }
+
+            _logger.Log(LogLevel.Debug, "Successfully made Cliparino sources visible.");
+
+            return true;
         } catch (Exception ex) {
             _logger.Log(LogLevel.Error, "Error while showing Cliparino in OBS.", ex);
+
+            return false;
         }
     }
 
@@ -188,15 +306,48 @@ public class ObsSceneManager {
     /// <param name="scene">
     ///     The name of the scene where the Cliparino source should be hidden.
     /// </param>
-    private void HideCliparino(string scene) {
+    /// <returns>
+    ///     True if the sources were successfully hidden, otherwise false.
+    /// </returns>
+    private bool HideCliparino(string scene) {
         try {
-            if (_cph.ObsIsSourceVisible(scene, CliparinoSourceName))
+            _logger.Log(LogLevel.Debug, $"Hiding Cliparino sources in scene '{scene}'.");
+
+            if (_cph.ObsIsSourceVisible(scene, CliparinoSourceName)) {
+                _logger.Log(LogLevel.Debug, $"Hiding '{CliparinoSourceName}' in scene '{scene}'.");
                 _cph.ObsSetSourceVisibility(scene, CliparinoSourceName, false);
 
-            if (_cph.ObsIsSourceVisible(CliparinoSourceName, PlayerSourceName))
+                // Verify the operation was successful
+                if (_cph.ObsIsSourceVisible(scene, CliparinoSourceName)) {
+                    _logger.Log(LogLevel.Error, $"Failed to hide '{CliparinoSourceName}' in scene '{scene}'.");
+
+                    return false;
+                }
+
+                _logger.Log(LogLevel.Debug, $"Successfully hid '{CliparinoSourceName}' in scene '{scene}'.");
+            }
+
+            if (_cph.ObsIsSourceVisible(CliparinoSourceName, PlayerSourceName)) {
+                _logger.Log(LogLevel.Debug, $"Hiding '{PlayerSourceName}' in '{CliparinoSourceName}'.");
                 _cph.ObsSetSourceVisibility(CliparinoSourceName, PlayerSourceName, false);
+
+                // Verify the operation was successful
+                if (_cph.ObsIsSourceVisible(CliparinoSourceName, PlayerSourceName)) {
+                    _logger.Log(LogLevel.Error, $"Failed to hide '{PlayerSourceName}' in '{CliparinoSourceName}'.");
+
+                    return false;
+                }
+
+                _logger.Log(LogLevel.Debug, $"Successfully hid '{PlayerSourceName}' in '{CliparinoSourceName}'.");
+            }
+
+            _logger.Log(LogLevel.Debug, "Successfully hid Cliparino sources.");
+
+            return true;
         } catch (Exception ex) {
             _logger.Log(LogLevel.Error, "Error while hiding Cliparino in OBS.", ex);
+
+            return false;
         }
     }
 
@@ -207,41 +358,89 @@ public class ObsSceneManager {
     ///     The URL to set for the OBS browser source.
     /// </param>
     /// <returns>
-    ///     A task that represents the asynchronous operation.
+    ///     A task that represents the asynchronous operation, with a boolean indicating success.
     /// </returns>
-    private async Task SetBrowserSourceAsync(string url) {
+    private async Task<bool> SetBrowserSourceAsync(string url) {
         try {
             _logger.Log(LogLevel.Debug, $"Setting Player URL to '{url}'.");
 
-            await Task.Run(() => _cph.ObsSetBrowserSource(CliparinoSourceName, PlayerSourceName, url));
+            await Task.Run(() => { _cph.ObsSetBrowserSource(CliparinoSourceName, PlayerSourceName, url); });
+
+            // Verify the URL was actually set by checking the current player URL
+            // We'll give it a moment to update since this is async
+            await Task.Delay(100);
+
+            var currentUrl = GetPlayerUrl();
+
+            if (currentUrl != null && !currentUrl.StartsWith("Error:") && currentUrl.Contains(url)) {
+                _logger.Log(LogLevel.Info, $"Successfully set browser source URL to '{url}'.");
+
+                return true;
+            } else {
+                _logger.Log(LogLevel.Error,
+                            $"Failed to set browser source URL to '{url}'. Current URL: '{currentUrl}'. Clip may not play.");
+
+                return false;
+            }
         } catch (Exception ex) {
             _logger.Log(LogLevel.Error, "Error setting OBS browser source.", ex);
+
+            return false;
         }
     }
 
     /// <summary>
     ///     Configures Cliparino and its player source in OBS, adding them as needed.
     /// </summary>
-    private void SetUpCliparino() {
+    /// <returns>
+    ///     True if Cliparino was successfully set up, otherwise false.
+    /// </returns>
+    private bool SetUpCliparino() {
         try {
+            _logger.Log(LogLevel.Debug, "Setting up Cliparino in OBS.");
+
             if (!CliparinoExists()) {
                 _logger.Log(LogLevel.Info, "Adding Cliparino scene to OBS.");
-                CreateCliparinoScene();
+
+                if (!CreateCliparinoScene()) {
+                    _logger.Log(LogLevel.Error, "Failed to create Cliparino scene.");
+
+                    return false;
+                }
             }
 
             if (!PlayerExists()) {
                 _logger.Log(LogLevel.Info, "Adding Player source to Cliparino scene.");
-                AddPlayerToCliparino();
+
+                if (!AddPlayerToCliparino()) {
+                    _logger.Log(LogLevel.Error, "Failed to add Player source to Cliparino scene.");
+
+                    return false;
+                }
+
                 _logger.Log(LogLevel.Info, $"Configuring audio for source: {PlayerSourceName}");
-                ConfigureAudioSettings();
+
+                if (!ConfigureAudioSettings())
+                    _logger.Log(LogLevel.Warn, "Audio configuration failed, but continuing with setup.");
             }
 
-            if (CliparinoInCurrentScene()) return;
+            if (!CliparinoInCurrentScene()) {
+                _logger.Log(LogLevel.Info, "Adding Cliparino to current scene.");
 
-            _logger.Log(LogLevel.Info, "Adding Cliparino to current scene.");
-            AddCliparinoToScene();
+                if (!AddCliparinoToScene()) {
+                    _logger.Log(LogLevel.Error, "Failed to add Cliparino to current scene.");
+
+                    return false;
+                }
+            }
+
+            _logger.Log(LogLevel.Info, "Cliparino setup completed successfully.");
+
+            return true;
         } catch (Exception ex) {
             _logger.Log(LogLevel.Error, "Error setting up Cliparino in OBS.", ex);
+
+            return false;
         }
     }
 
@@ -258,10 +457,37 @@ public class ObsSceneManager {
     ///     True if the source exists in the scene, otherwise false.
     /// </returns>
     private bool SourceIsInScene(string scene, string source) {
-        var response = GetSceneItemId(scene, source);
-        var itemId = response is string ? -1 : response.sceneItemId;
+        try {
+            var response = GetSceneItemId(scene, source);
 
-        return itemId > 0;
+            // Handle null response (error occurred)
+            if (response == null) {
+                _logger.Log(LogLevel.Debug,
+                            $"Could not determine if source '{source}' exists in scene '{scene}' due to error.");
+
+                return false;
+            }
+
+            // Handle sentinel value indicating not found
+            if (response is string && response == "not_found") {
+                _logger.Log(LogLevel.Debug, $"Source '{source}' does not exist in scene '{scene}'.");
+
+                return false;
+            }
+
+            // Try to get the scene item ID
+            var itemId = response.sceneItemId;
+            var exists = itemId != null && (int)itemId > 0;
+
+            _logger.Log(LogLevel.Debug,
+                        $"Source '{source}' in scene '{scene}': {(exists ? "exists" : "does not exist")} (ID: {itemId}).");
+
+            return exists;
+        } catch (Exception ex) {
+            _logger.Log(LogLevel.Error, $"Error checking if source '{source}' exists in scene '{scene}'.", ex);
+
+            return false;
+        }
     }
 
     /// <summary>
@@ -294,46 +520,99 @@ public class ObsSceneManager {
     ///     The name of the source in the scene.
     /// </param>
     /// <returns>
-    ///     A dynamic object containing information about the scene item.
+    ///     A dynamic object containing information about the scene item, or null if the operation failed.
     /// </returns>
     private dynamic GetSceneItemId(string sceneName, string sourceName) {
-        var payload = new Payload {
-            RequestType = "GetSceneItemId", RequestData = new { sceneName, sourceName, searchOffset = 0 }
-        };
+        try {
+            var payload = new Payload {
+                RequestType = "GetSceneItemId", RequestData = new { sceneName, sourceName, searchOffset = 0 }
+            };
 
-        var response =
-            JsonConvert.DeserializeObject<dynamic>(_cph.ObsSendRaw(payload.RequestType,
-                                                                   JsonConvert.SerializeObject(payload.RequestData)));
+            var rawResponse = _cph.ObsSendRaw(payload.RequestType, JsonConvert.SerializeObject(payload.RequestData));
 
-        return response;
+            // Note: GetSceneItemId may return an error response if the item doesn't exist, which is expected behavior
+            // We'll validate but not log errors for this case since it's used to check existence
+            if (rawResponse == null) {
+                _logger.Log(LogLevel.Debug,
+                            $"GetSceneItemId returned null for source '{sourceName}' in scene '{sceneName}'.");
+
+                return null;
+            }
+
+            var response = JsonConvert.DeserializeObject<dynamic>(rawResponse);
+
+            // Check if the response indicates an error (source not found)
+            if (response?.error != null) {
+                _logger.Log(LogLevel.Debug,
+                            $"Source '{sourceName}' not found in scene '{sceneName}': {response.error}");
+
+                return "not_found"; // Return a sentinel value to indicate not found
+            }
+
+            _logger.Log(LogLevel.Debug,
+                        $"Successfully retrieved scene item ID for source '{sourceName}' in scene '{sceneName}'.");
+
+            return response;
+        } catch (Exception ex) {
+            _logger.Log(LogLevel.Error,
+                        $"Error retrieving scene item ID for source '{sourceName}' in scene '{sceneName}'.",
+                        ex);
+
+            return null;
+        }
     }
 
     /// <summary>
     ///     Adds the Cliparino source to the currently active scene in OBS.
     /// </summary>
-    private void AddCliparinoToScene() {
-        var payload = new Payload {
-            RequestType = "CreateSceneItem",
-            RequestData = new { sceneName = CurrentScene(), sourceName = CliparinoSourceName, sceneItemEnabled = true }
-        };
+    /// <returns>
+    ///     True if the Cliparino source was successfully added to the scene, otherwise false.
+    /// </returns>
+    private bool AddCliparinoToScene() {
+        try {
+            var currentScene = CurrentScene();
+            var payload = new Payload {
+                RequestType = "CreateSceneItem",
+                RequestData = new {
+                    sceneName = currentScene, sourceName = CliparinoSourceName, sceneItemEnabled = true
+                }
+            };
 
-        _cph.ObsSendRaw(payload.RequestType, JsonConvert.SerializeObject(payload.RequestData));
+            var response = _cph.ObsSendRaw(payload.RequestType, JsonConvert.SerializeObject(payload.RequestData));
 
-        if (CliparinoInCurrentScene())
-            _logger.Log(LogLevel.Info, $"Added Cliparino to scene '{CurrentScene()}'.");
-        else
-            _logger.Log(LogLevel.Error, $"Failed to add Cliparino to scene '{CurrentScene()}'.");
+            if (!ValidateObsOperation("CreateSceneItem", response, $"add Cliparino to scene '{currentScene}'"))
+                return false;
+
+            // Double-check that Cliparino is actually in the current scene
+            if (CliparinoInCurrentScene()) {
+                _logger.Log(LogLevel.Info, $"Added Cliparino to scene '{currentScene}'.");
+
+                return true;
+            } else {
+                _logger.Log(LogLevel.Error,
+                            $"Adding Cliparino to scene '{currentScene}' appeared successful but Cliparino is not in the scene.");
+
+                return false;
+            }
+        } catch (Exception ex) {
+            _logger.Log(LogLevel.Error, "Error adding Cliparino to current scene.", ex);
+
+            return false;
+        }
     }
 
     /// <summary>
     ///     Adds the Player source to the Cliparino scene with proper settings and dimensions.
     /// </summary>
-    private void AddPlayerToCliparino() {
+    /// <returns>
+    ///     True if the Player source was successfully added, otherwise false.
+    /// </returns>
+    private bool AddPlayerToCliparino() {
         try {
             if (Dimensions == null) {
                 _logger.Log(LogLevel.Error, "CPHInline.Dimensions is null. Cannot add Player to Cliparino.");
 
-                return;
+                return false;
             }
 
             var height = Dimensions.Height;
@@ -365,21 +644,37 @@ public class ObsSceneManager {
 
             var response = _cph.ObsSendRaw(payload.RequestType, JsonConvert.SerializeObject(payload.RequestData));
 
-            if (PlayerExists())
+            if (!ValidateObsOperation("CreateInput",
+                                      response,
+                                      $"create browser source '{PlayerSourceName}' in scene '{CliparinoSourceName}'"))
+                return false;
+
+            // Double-check that the player actually exists
+            if (PlayerExists()) {
                 _logger.Log(LogLevel.Info,
                             $"Browser source '{PlayerSourceName}' added to scene '{CliparinoSourceName}' with URL '{InactiveUrl}'.");
-            else
+
+                return true;
+            } else {
                 _logger.Log(LogLevel.Error,
-                            $"Browser source '{PlayerSourceName}' could not be added.\nResponse: {response}");
+                            $"Browser source '{PlayerSourceName}' creation appeared successful but source does not exist.");
+
+                return false;
+            }
         } catch (Exception ex) {
             _logger.Log(LogLevel.Error, "An error occurred while adding the Player source to Cliparino.", ex);
+
+            return false;
         }
     }
 
     /// <summary>
     ///     Creates the Cliparino scene in OBS.
     /// </summary>
-    private void CreateCliparinoScene() {
+    /// <returns>
+    ///     True if the scene was successfully created, otherwise false.
+    /// </returns>
+    private bool CreateCliparinoScene() {
         try {
             var payload = new Payload {
                 RequestType = "CreateScene", RequestData = new { sceneName = CliparinoSourceName }
@@ -387,13 +682,23 @@ public class ObsSceneManager {
 
             var response = _cph.ObsSendRaw(payload.RequestType, JsonConvert.SerializeObject(payload.RequestData));
 
-            if (CliparinoExists())
+            if (!ValidateObsOperation("CreateScene", response, $"create scene '{CliparinoSourceName}'")) return false;
+
+            // Double-check that the scene actually exists
+            if (CliparinoExists()) {
                 _logger.Log(LogLevel.Info, $"Scene '{CliparinoSourceName}' created successfully.");
-            else
+
+                return true;
+            } else {
                 _logger.Log(LogLevel.Error,
-                            $"Scene '{CliparinoSourceName}' could not be created.\nResponse: {response}");
+                            $"Scene '{CliparinoSourceName}' creation appeared successful but scene does not exist.");
+
+                return false;
+            }
         } catch (Exception ex) {
-            _logger.Log(LogLevel.Error, $"Error in CreateCliparinoScene: {ex.Message}");
+            _logger.Log(LogLevel.Error, $"Error in CreateCliparinoScene: {ex.Message}", ex);
+
+            return false;
         }
     }
 
@@ -424,27 +729,43 @@ public class ObsSceneManager {
     /// </returns>
     private bool SceneExists(string sceneName) {
         try {
-            var sceneExists = false;
-            var response = JsonConvert.DeserializeObject<dynamic>(_cph.ObsSendRaw("GetSceneList", "{}"));
+            var rawResponse = _cph.ObsSendRaw("GetSceneList", "{}");
 
+            if (!ValidateObsOperation("GetSceneList", rawResponse, "retrieve scene list")) {
+                _logger.Log(LogLevel.Error, "Failed to retrieve scene list from OBS.");
+
+                return false;
+            }
+
+            var response = JsonConvert.DeserializeObject<dynamic>(rawResponse);
             var scenes = response?.scenes;
 
-            _logger.Log(LogLevel.Debug, $"Scenes pulled from OBS: {JsonConvert.SerializeObject(scenes)}");
+            if (scenes == null) {
+                _logger.Log(LogLevel.Error, "Scene list is null or empty in OBS response.");
 
-            if (scenes != null)
-                foreach (var scene in scenes) {
-                    if ((string)scene.sceneName != sceneName) continue;
+                return false;
+            }
 
-                    sceneExists = true;
+            _logger.Log(LogLevel.Debug, $"Found {((IEnumerable<dynamic>)scenes).Count()} scenes in OBS.");
 
-                    break;
-                }
+            var sceneExists = false;
 
-            if (!sceneExists) _logger.Log(LogLevel.Warn, $"Scene '{sceneName}' does not exist.");
+            foreach (var scene in scenes) {
+                if ((string)scene.sceneName != sceneName) continue;
+
+                sceneExists = true;
+
+                break;
+            }
+
+            _logger.Log(LogLevel.Debug,
+                        sceneExists
+                            ? $"Scene '{sceneName}' exists in OBS."
+                            : $"Scene '{sceneName}' does not exist in OBS.");
 
             return sceneExists;
         } catch (Exception ex) {
-            _logger.Log(LogLevel.Error, "An error occurred while checking if Cliparino scene exists.", ex);
+            _logger.Log(LogLevel.Error, $"An error occurred while checking if scene '{sceneName}' exists.", ex);
 
             return false;
         }
@@ -454,58 +775,74 @@ public class ObsSceneManager {
     ///     Configures audio settings for the Player source in OBS, including the monitoring type, volume,
     ///     and filters.
     /// </summary>
-    private void ConfigureAudioSettings() {
+    /// <returns>
+    ///     True if all audio settings were successfully configured, otherwise false.
+    /// </returns>
+    private bool ConfigureAudioSettings() {
         if (!PlayerExists()) {
             _logger.Log(LogLevel.Warn, "Cannot configure audio settings because Player source doesn't exist.");
 
-            return;
+            return false;
         }
 
         try {
+            var allSuccessful = true;
+
+            // Set the monitor type
             var monitorTypePayload = GenerateSetInputAudioMonitorTypePayload("OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT");
             var monitorTypeResponse = _cph.ObsSendRaw(monitorTypePayload.RequestType,
                                                       JsonConvert.SerializeObject(monitorTypePayload.RequestData));
 
-            if (string.IsNullOrEmpty(monitorTypeResponse) || monitorTypeResponse != "{}") {
+            if (!ValidateObsOperation("SetInputAudioMonitorType",
+                                      monitorTypeResponse,
+                                      "set monitor type for Player source")) {
                 _logger.Log(LogLevel.Error, "Failed to set monitor type for the Player source.");
-
-                return;
+                allSuccessful = false;
             }
 
+            // Set input volume
             var inputVolumePayload = GenerateSetInputVolumePayload(-12);
             var inputVolumeResponse = _cph.ObsSendRaw(inputVolumePayload.RequestType,
                                                       JsonConvert.SerializeObject(inputVolumePayload.RequestData));
 
-            if (string.IsNullOrEmpty(inputVolumeResponse) || inputVolumeResponse != "{}") {
+            if (!ValidateObsOperation("SetInputVolume", inputVolumeResponse, "set volume for Player source")) {
                 _logger.Log(LogLevel.Warn, "Failed to set volume for the Player source.");
-
-                return;
+                allSuccessful = false;
             }
 
+            // Add gain filter
             var gainFilterPayload = GenerateGainFilterPayload(3);
             var gainFilterResponse = _cph.ObsSendRaw(gainFilterPayload.RequestType,
                                                      JsonConvert.SerializeObject(gainFilterPayload.RequestData));
 
-            if (string.IsNullOrEmpty(gainFilterResponse) || gainFilterResponse != "{}") {
+            if (!ValidateObsOperation("CreateSourceFilter", gainFilterResponse, "add Gain filter to Player source")) {
                 _logger.Log(LogLevel.Warn, "Failed to add Gain filter to the Player source.");
-
-                return;
+                allSuccessful = false;
             }
 
+            // Add compressor filter
             var compressorFilterPayload = GenerateCompressorFilterPayload();
             var compressorFilterResponse = _cph.ObsSendRaw(compressorFilterPayload.RequestType,
                                                            JsonConvert.SerializeObject(compressorFilterPayload
                                                                                            .RequestData));
 
-            if (string.IsNullOrEmpty(compressorFilterResponse) || compressorFilterResponse != "{}") {
+            if (!ValidateObsOperation("CreateSourceFilter",
+                                      compressorFilterResponse,
+                                      "add Compressor filter to Player source")) {
                 _logger.Log(LogLevel.Warn, "Failed to add Compressor filter to the Player source.");
-
-                return;
+                allSuccessful = false;
             }
 
-            _logger.Log(LogLevel.Info, "Audio configuration for Player source completed successfully.");
+            if (allSuccessful)
+                _logger.Log(LogLevel.Info, "Audio configuration for Player source completed successfully.");
+            else
+                _logger.Log(LogLevel.Warn, "Audio configuration completed with some failures.");
+
+            return allSuccessful;
         } catch (Exception ex) {
             _logger.Log(LogLevel.Error, "An error occurred during audio configuration setup.", ex);
+
+            return false;
         }
     }
 
@@ -584,6 +921,90 @@ public class ObsSceneManager {
         return new Payload {
             RequestType = "SetInputAudioMonitorType", RequestData = new { inputName = "Player", monitorType }
         };
+    }
+
+    /// <summary>
+    ///     Validates the response from an OBS operation to determine if it was successful.
+    /// </summary>
+    /// <param name="operationName">
+    ///     The name of the OBS operation being validated (for logging purposes).
+    /// </param>
+    /// <param name="response">
+    ///     The response from the OBS operation.
+    /// </param>
+    /// <param name="operationDescription">
+    ///     A human-readable description of what the operation was attempting to do.
+    /// </param>
+    /// <returns>
+    ///     True if the operation was successful, otherwise false.
+    /// </returns>
+    private bool ValidateObsOperation(string operationName, object response, string operationDescription) {
+        try {
+            if (response == null) {
+                _logger.Log(LogLevel.Error,
+                            $"OBS operation '{operationName}' returned null response while attempting to {operationDescription}.");
+
+                return false;
+            }
+
+            var responseString = response.ToString();
+
+            // Empty string or whitespace typically indicates success for many OBS operations
+            if (string.IsNullOrWhiteSpace(responseString)) {
+                _logger.Log(LogLevel.Debug,
+                            $"OBS operation '{operationName}' completed successfully (empty response) for: {operationDescription}.");
+
+                return true;
+            }
+
+            // Check for common success patterns
+            if (responseString == "{}" || responseString.Equals("true", StringComparison.OrdinalIgnoreCase)) {
+                _logger.Log(LogLevel.Debug,
+                            $"OBS operation '{operationName}' completed successfully for: {operationDescription}.");
+
+                return true;
+            }
+
+            // Try to parse as JSON to check for error indicators
+            try {
+                var jsonResponse = JsonConvert.DeserializeObject<JObject>(responseString);
+
+                // Check for common error patterns in OBS WebSocket responses
+                if (jsonResponse?["error"] != null || jsonResponse?["status"] != null) {
+                    var errorMsg = jsonResponse["error"]?.ToString() ?? jsonResponse["status"]?.ToString();
+                    _logger.Log(LogLevel.Error,
+                                $"OBS operation '{operationName}' failed while attempting to {operationDescription}. Error: {errorMsg}");
+
+                    return false;
+                }
+
+                // If we have a structured response without explicit errors, consider it successful
+                _logger.Log(LogLevel.Debug,
+                            $"OBS operation '{operationName}' completed with structured response for: {operationDescription}.");
+
+                return true;
+            } catch {
+                // If JSON parsing fails, check if the response looks like an error message
+                if (responseString.ToLower().Contains("error") || responseString.ToLower().Contains("fail")) {
+                    _logger.Log(LogLevel.Error,
+                                $"OBS operation '{operationName}' failed while attempting to {operationDescription}. Response: {responseString}");
+
+                    return false;
+                }
+
+                // For non-JSON responses that don't look like errors, assume success but log for investigation
+                _logger.Log(LogLevel.Debug,
+                            $"OBS operation '{operationName}' completed with non-JSON response for: {operationDescription}. Response: {responseString}");
+
+                return true;
+            }
+        } catch (Exception ex) {
+            _logger.Log(LogLevel.Error,
+                        $"Error validating OBS operation '{operationName}' response while attempting to {operationDescription}.",
+                        ex);
+
+            return false;
+        }
     }
 
     /// <summary>

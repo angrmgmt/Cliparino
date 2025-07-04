@@ -1,4 +1,4 @@
-﻿/*  Cliparino is a clip player for Twitch.tv built to work with Streamer.bot.
+/*  Cliparino is a clip player for Twitch.tv built to work with Streamer.bot.
     Copyright (C) 2024 Scott Mongrain - (angrmgmt@gmail.com)
 
     This library is free software; you can redistribute it and/or
@@ -181,7 +181,7 @@ public class CPHInline : CPHInlineBase {
 
             if (_clipManager != null) _logger?.Log(LogLevel.Debug, "ClipManager initialized successfully.");
 
-            _obsSceneManager = new ObsSceneManager(CPH, _logger);
+            _obsSceneManager = new ObsSceneManager(CPH, _logger, _httpManager);
 
             if (_obsSceneManager != null) _logger?.Log(LogLevel.Debug, "ObsSceneManager initialized successfully.");
 
@@ -466,11 +466,28 @@ public class CPHInline : CPHInlineBase {
     ///     indicating whether the clip was successfully played.
     /// </returns>
     private async Task<bool> PlayClipAsync(ClipData clipData) {
-        _httpManager.HostClip(clipData);
+        var hostSuccess = _httpManager.HostClip(clipData);
 
-        await _obsSceneManager.PlayClipAsync(clipData);
+        if (!hostSuccess) {
+            _logger.Log(LogLevel.Error, $"Failed to prepare clip '{clipData?.Title}' for hosting. Aborting playback.");
+
+            return false;
+        }
+
+        var playSuccess = await _obsSceneManager.PlayClipAsync(clipData);
+
+        if (!playSuccess) {
+            _logger.Log(LogLevel.Error, $"Failed to play clip '{clipData.Title}' in OBS. Aborting playback.");
+
+            return false;
+        }
+
         await Task.Delay((int)clipData.Duration * 1000 + 3000);
-        await HandleStopCommandAsync();
+
+        var stopSuccess = await HandleStopCommandAsync();
+
+        if (!stopSuccess)
+            _logger.Log(LogLevel.Warn, "Clip playback completed but there were issues stopping the clip.");
 
         _clipManager.SetLastClipUrl(clipData.Url);
 
@@ -591,11 +608,30 @@ public class CPHInline : CPHInlineBase {
             var message = GetArgument(CPH, "soMessage", "");
 
             _twitchApiManager.SendShoutout(username, message);
-            _httpManager.HostClip(clipData);
 
-            await _obsSceneManager.PlayClipAsync(clipData);
+            var hostSuccess = _httpManager.HostClip(clipData);
+
+            if (!hostSuccess) {
+                _logger.Log(LogLevel.Error,
+                            $"Failed to prepare shoutout clip for {username} for hosting. Aborting playback.");
+
+                return false;
+            }
+
+            var playSuccess = await _obsSceneManager.PlayClipAsync(clipData);
+
+            if (!playSuccess) {
+                _logger.Log(LogLevel.Error, $"Failed to play shoutout clip for {username} in OBS. Aborting playback.");
+
+                return false;
+            }
+
             await Task.Delay((int)clipData.Duration * 1000 + 3000);
-            await HandleStopCommandAsync();
+
+            var stopSuccess = await HandleStopCommandAsync();
+
+            if (!stopSuccess)
+                _logger.Log(LogLevel.Warn, "Shoutout clip playback completed but there were issues stopping the clip.");
 
             _clipManager.SetLastClipUrl(clipData.Url);
 
@@ -640,11 +676,35 @@ public class CPHInline : CPHInlineBase {
             if (!string.IsNullOrEmpty(lastClipUrl)) {
                 var clipData = await _clipManager.GetClipDataAsync(lastClipUrl);
 
-                _httpManager.HostClip(clipData);
+                if (clipData == null) {
+                    _logger.Log(LogLevel.Error, "Failed to retrieve clip data for replay.");
 
-                await _obsSceneManager.PlayClipAsync(clipData);
+                    return false;
+                }
+
+                var hostSuccess = _httpManager.HostClip(clipData);
+
+                if (!hostSuccess) {
+                    _logger.Log(LogLevel.Error, "Failed to prepare replay clip for hosting. Aborting playback.");
+
+                    return false;
+                }
+
+                var playSuccess = await _obsSceneManager.PlayClipAsync(clipData);
+
+                if (!playSuccess) {
+                    _logger.Log(LogLevel.Error, "Failed to play replay clip in OBS. Aborting playback.");
+
+                    return false;
+                }
+
                 await Task.Delay((int)clipData.Duration * 1000 + 3000);
-                await HandleStopCommandAsync();
+
+                var stopSuccess = await HandleStopCommandAsync();
+
+                if (!stopSuccess)
+                    _logger.Log(LogLevel.Warn,
+                                "Replay clip playback completed but there were issues stopping the clip.");
 
                 return true;
             }
@@ -676,9 +736,14 @@ public class CPHInline : CPHInlineBase {
 
             _logger.Log(LogLevel.Info, "Stopping clip.");
 
-            HandleStopCommandAsync().GetAwaiter().GetResult();
+            var result = HandleStopCommandAsync().GetAwaiter().GetResult();
 
-            return true;
+            if (result)
+                _logger.Log(LogLevel.Info, "Clip stop operation completed successfully.");
+            else
+                _logger.Log(LogLevel.Error, "Clip stop operation failed.");
+
+            return result;
         } catch (Exception ex) {
             _logger?.Log(LogLevel.Error, "Error occurred while stopping clip.", ex);
 
@@ -697,10 +762,18 @@ public class CPHInline : CPHInlineBase {
         _logger.Log(LogLevel.Debug, "Handling !stop command.");
 
         try {
-            await _obsSceneManager.StopClip();
-            // await _httpManager.StopHosting();
-            //
-            // _httpManager.Client.CancelPendingRequests();
+            var stopSuccess = await _obsSceneManager.StopClip();
+
+            if (!stopSuccess) {
+                _logger.Log(LogLevel.Error, "Failed to stop clip in OBS.");
+
+                return false;
+            }
+
+            await _httpManager.StopHosting();
+            _httpManager.Client.CancelPendingRequests();
+
+            _logger.Log(LogLevel.Info, "Successfully stopped clip playback.");
 
             return true;
         } catch (Exception ex) {

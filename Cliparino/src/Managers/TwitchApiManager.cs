@@ -528,9 +528,7 @@ public class TwitchApiManager {
     /// </summary>
     /// <returns>
     ///     A task that represents the asynchronous operation. The task result is <c>true</c> if the token
-    ///     refresh was triggered successfully; otherwise, <c>
-    ///         false
-    ///     </c>.
+    ///     refresh was triggered successfully; otherwise, <c>false</c>.
     /// </returns>
     /// <remarks>
     ///     This method forces Streamer Bot to make a Twitch API call, which will cause it to automatically
@@ -568,9 +566,7 @@ public class TwitchApiManager {
     /// </summary>
     /// <returns>
     ///     A task that represents the asynchronous operation. The task result is <c>true</c> if the token
-    ///     was refreshed successfully; otherwise, <c>
-    ///         false
-    ///     </c>.
+    ///     was refreshed successfully; otherwise, <c>false</c>.
     /// </returns>
     /// <remarks>
     ///     This method can be called manually to test the token refresh mechanism or to preemptively
@@ -593,7 +589,7 @@ public class TwitchApiManager {
         if (newToken == currentToken) {
             _logger.Log(LogLevel.Info, "Manual token refresh completed - token was already current.");
 
-            return true; // This is actually success - the token was already valid
+            return true; // This is actually a success - the token was already valid
         }
 
         _oauthInfo.TwitchOAuthToken = newToken;
@@ -607,9 +603,7 @@ public class TwitchApiManager {
     ///     Attempts to trigger a token refresh by making Streamer Bot perform a Twitch API call.
     /// </summary>
     /// <returns>
-    ///     <c>true</c> if at least one API call was successful; otherwise, <c>
-    ///         false
-    ///     </c>.
+    ///     <c>true</c> if at least one API call was successful; otherwise, <c>false</c>.
     /// </returns>
     private async Task<bool> TryTriggerRefreshWithApiCall() {
         // Try to derive broadcaster username from the client context

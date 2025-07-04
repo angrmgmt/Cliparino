@@ -1,4 +1,4 @@
-﻿#region
+#region
 
 using System;
 using System.Collections.Generic;
@@ -70,7 +70,14 @@ internal static class FileProcessor {
             foreach (var line in lines) {
                 var trimmedLine = line.Trim();
 
+                // Check if this is a using directive (not a using statement)
+                // Using directives: "using System.IO;" 
+                // Using statements: "using (var response = ...)" or "using var response = ..."
                 if (!trimmedLine.StartsWith("using ", StringComparison.Ordinal) || !trimmedLine.EndsWith(";")) continue;
+
+                // Skip using statements (those that contain parentheses or var)
+                if (trimmedLine.Contains("(") || trimmedLine.Contains(" var ") || trimmedLine.Contains("\tvar "))
+                    continue;
 
                 Console.WriteLine($"  [Found Using] {trimmedLine}");
                 usingDirectives.Add(trimmedLine);
@@ -131,8 +138,25 @@ internal static class FileProcessor {
     /// </returns>
     private static string ProcessRegex(string content) {
         var lines = content.Split(new[] { Environment.NewLine }, StringSplitOptions.None);
-        var nonUsingLines = lines.Where(line => !line.TrimStart().StartsWith("using ", StringComparison.Ordinal));
-        var cleanedContent = string.Join(Environment.NewLine, nonUsingLines);
+
+        // Only remove using directives, not using statements
+        var nonUsingDirectiveLines = lines.Where(line => {
+                                                     var trimmedLine = line.TrimStart();
+
+                                                     if (!trimmedLine.StartsWith("using ", StringComparison.Ordinal))
+                                                         return true;
+
+                                                     // Keep using statements (those that contain parentheses or var)
+                                                     if (trimmedLine.Contains("(")
+                                                         || trimmedLine.Contains(" var ")
+                                                         || trimmedLine.Contains("\tvar "))
+                                                         return true;
+
+                                                     // Remove using directives (namespace imports)
+                                                     return false;
+                                                 });
+
+        var cleanedContent = string.Join(Environment.NewLine, nonUsingDirectiveLines);
 
         cleanedContent = RegexUtilities.RemoveDevEnvInheritance(cleanedContent);
         cleanedContent = RegexUtilities.RemoveXmlDocComments(cleanedContent);

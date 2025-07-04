@@ -1,4 +1,4 @@
-﻿/*  Cliparino is a clip player for Twitch.tv built to work with Streamer.bot.
+/*  Cliparino is a clip player for Twitch.tv built to work with Streamer.bot.
     Copyright (C) 2024 Scott Mongrain - (angrmgmt@gmail.com)
 
     This library is free software; you can redistribute it and/or
@@ -40,7 +40,8 @@ using Twitch.Common.Models.Api;
 /// </summary>
 public class HttpManager {
     private const int NonceLength = 16;
-    private const string ServerUrl = "http://localhost:8080/";
+    private const int BasePort = 8080;
+    private const int MaxPortRetries = 10;
     private const string HelixApiUrl = "https://api.twitch.tv/helix/";
 
     private const string CSSText = @"
@@ -168,6 +169,7 @@ public class HttpManager {
     private readonly TwitchApiManager _twitchApiManager;
     public readonly HttpClient Client;
     private ClipData _clipData;
+    private int _currentPort = BasePort;
     private HttpListener _listener;
 
     public HttpManager(CPHLogger logger, TwitchApiManager twitchApiManager) {
@@ -175,6 +177,16 @@ public class HttpManager {
         _twitchApiManager = twitchApiManager;
         Client = new HttpClient { BaseAddress = new Uri(HelixApiUrl) };
     }
+
+    /// <summary>
+    ///     Gets the current server URL being used by the HTTP server.
+    /// </summary>
+    public string ServerUrl { get; private set; } = $"http://localhost:{BasePort}/";
+
+    /// <summary>
+    ///     Gets a value indicating whether the HTTP server is currently running.
+    /// </summary>
+    private bool IsServerRunning => _listener?.IsListening == true;
 
     /// <summary>
     ///     Generates a dictionary containing headers for Cross-Origin Resource Sharing (CORS)
@@ -216,25 +228,183 @@ public class HttpManager {
     /// <remarks>
     ///     This method initializes an <see cref="HttpListener" />, configures it with the server URL, and
     ///     starts listening for incoming HTTP requests. If the HTTP server is already running, the method
-    ///     returns without performing any action. Logs messages to indicate the success or failure of the
-    ///     server startup process.
+    ///     returns without performing any action. If the default port is in use, it will try alternative ports.
+    ///     Logs messages to indicate the success or failure of the server startup process.
     /// </remarks>
     /// <exception cref="System.Exception">
     ///     Throws an exception if there is an error while starting the server or initializing the HTTP
-    ///     listener.
+    ///     listener after trying all available ports.
     /// </exception>
     public void StartServer() {
         try {
-            if (_listener != null) return;
+            // Check if the server is already running
+            if (IsServerRunning) {
+                _logger.Log(LogLevel.Info, $"HTTP server is already running at {ServerUrl}");
 
-            _listener = new HttpListener();
-            _listener.Prefixes.Add(ServerUrl);
-            _listener.Start();
-            _listener.BeginGetContext(HandleRequest, null);
+                return;
+            }
 
-            _logger.Log(LogLevel.Info, $"HTTP server started at {ServerUrl}");
-        } catch (Exception ex) {
+            // Clean up any existing listener that isn't running
+            if (_listener != null) {
+                try {
+                    _listener.Close();
+                } catch {
+                    // Ignore cleanup errors
+                }
+
+                _listener = null;
+            }
+
+            var portAttempts = 0;
+            _currentPort = BasePort;
+
+            while (portAttempts < MaxPortRetries) {
+                try {
+                    ServerUrl = $"http://localhost:{_currentPort}/";
+                    _listener = new HttpListener();
+                    _listener.Prefixes.Add(ServerUrl);
+                    _listener.Start();
+                    _listener.BeginGetContext(HandleRequest, null);
+
+                    _logger.Log(LogLevel.Info, $"HTTP server started successfully at {ServerUrl}");
+
+                    return;
+                } catch (HttpListenerException ex) when (IsPortInUseError(ex)) {
+                    // Port is in use, try the next port
+                    CleanupListener();
+                    _currentPort++;
+                    portAttempts++;
+
+                    if (portAttempts < MaxPortRetries)
+                        _logger.Log(LogLevel.Warn,
+                                    $"Port {_currentPort - 1} is in use (Error: {ex.ErrorCode}), trying port {_currentPort}...");
+                } catch (Exception ex) {
+                    CleanupListener();
+                    _logger.Log(LogLevel.Error,
+                                $"Unexpected error starting HTTP server on port {_currentPort}: {ex.Message}",
+                                ex);
+
+                    throw;
+                }
+            }
+
+            var errorMessage =
+                $"Failed to start HTTP server after trying ports {BasePort} to {_currentPort - 1}. All ports are in use.";
+            _logger.Log(LogLevel.Error, errorMessage);
+
+            throw new InvalidOperationException(errorMessage);
+        } catch (Exception ex) when (!(ex is InvalidOperationException)) {
             _logger.Log(LogLevel.Error, "Failed to start HTTP server.", ex);
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    ///     Determines if the given HttpListenerException indicates a port is in use.
+    /// </summary>
+    /// <param name="ex">
+    ///     The HttpListenerException to check.
+    /// </param>
+    /// <returns>
+    ///     True if the error indicates the port is in use, false otherwise.
+    /// </returns>
+    private static bool IsPortInUseError(HttpListenerException ex) {
+        // Common error codes for port in use:
+        // 32 = ERROR_SHARING_VIOLATION
+        //   (The process cannot access the file because it is being used by another process)
+        // 183 = ERROR_ALREADY_EXISTS
+        //   (Cannot create a file when that file already exists)
+        // 10048 = WSAEADDRINUSE
+        //   (Address already in use)
+        return ex.ErrorCode == 32 || ex.ErrorCode == 183 || ex.ErrorCode == 10048;
+    }
+
+    /// <summary>
+    ///     Safely cleans up the HTTP listener.
+    /// </summary>
+    private void CleanupListener() {
+        if (_listener == null) return;
+
+        try {
+            _listener.Close();
+        } catch {
+            // Ignore cleanup errors
+        }
+
+        _listener = null;
+    }
+
+    /// <summary>
+    ///     Tests if the HTTP server is responding properly by making a simple request.
+    /// </summary>
+    /// <returns>
+    ///     True if the server is responding, false otherwise.
+    /// </returns>
+    private bool TestServerResponse() {
+        if (!IsServerRunning) {
+            _logger.Log(LogLevel.Warn, "TestServerResponse: Server is not running.");
+
+            return false;
+        }
+
+        try {
+            using (var client = new HttpClient()) {
+                client.Timeout = TimeSpan.FromSeconds(5);
+                var response = client.GetAsync(ServerUrl).Result;
+                var isSuccess = response.IsSuccessStatusCode;
+
+                if (isSuccess)
+                    _logger.Log(LogLevel.Debug, $"Server response test successful: {response.StatusCode}");
+                else
+                    _logger.Log(LogLevel.Warn, $"Server response test failed: {response.StatusCode}");
+
+                return isSuccess;
+            }
+        } catch (Exception ex) {
+            _logger.Log(LogLevel.Error, $"Server response test failed with exception: {ex.Message}");
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    ///     Validates that the HTTP server is properly configured and ready to serve clips.
+    /// </summary>
+    /// <returns>
+    ///     True if the server is ready, false otherwise.
+    /// </returns>
+    public bool ValidateServerReadiness() {
+        try {
+            // Check if the server is running
+            if (!IsServerRunning) {
+                _logger.Log(LogLevel.Error, "Server readiness check failed: HTTP server is not running.");
+
+                return false;
+            }
+
+            // Test if the server responds to requests
+            if (!TestServerResponse()) {
+                _logger.Log(LogLevel.Error,
+                            "Server readiness check failed: HTTP server is not responding to requests.");
+
+                return false;
+            }
+
+            // Check if clip data is available
+            if (_clipData == null) {
+                _logger.Log(LogLevel.Warn, "Server readiness check: No clip data loaded, but server is ready.");
+
+                return true; // Server is ready, just no clip loaded yet
+            }
+
+            _logger.Log(LogLevel.Info, $"Server readiness check passed: Ready to serve clips at {ServerUrl}");
+
+            return true;
+        } catch (Exception ex) {
+            _logger.Log(LogLevel.Error, "Server readiness check failed with exception.", ex);
+
+            return false;
         }
     }
 
@@ -245,11 +415,16 @@ public class HttpManager {
     ///     A Task representing the asynchronous operation of stopping the hosting process.
     /// </returns>
     public async Task StopHosting() {
-        _logger.Log(LogLevel.Info, "Stopped hosting clip.");
+        _logger.Log(LogLevel.Info, "Stopping clip hosting and HTTP server...");
 
         await Task.Run(() => {
-                           Client.CancelPendingRequests();
-                           _listener?.Close();
+                           try {
+                               Client.CancelPendingRequests();
+                               CleanupListener();
+                               _logger.Log(LogLevel.Info, "HTTP server stopped successfully.");
+                           } catch (Exception ex) {
+                               _logger.Log(LogLevel.Warn, "Error occurred while stopping HTTP server.", ex);
+                           }
                        });
     }
 
@@ -259,14 +434,55 @@ public class HttpManager {
     /// <param name="clipData">
     ///     The clip data containing details about the Twitch clip to be hosted.
     /// </param>
-    public void HostClip(ClipData clipData) {
+    /// <returns>
+    ///     True if the clip was successfully prepared for hosting, otherwise false.
+    /// </returns>
+    public bool HostClip(ClipData clipData) {
         try {
-            _clipData = clipData ?? throw new ArgumentNullException(nameof(clipData));
-            _logger.Log(LogLevel.Info, $"Hosting clip {clipData.Id}");
-        } catch (ArgumentNullException argEx) {
-            _logger.Log(LogLevel.Error, "Error while hosting clip.", argEx);
+            if (clipData == null) {
+                _logger.Log(LogLevel.Error, "Cannot host clip: clip data is null.");
+
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(clipData.Id)) {
+                _logger.Log(LogLevel.Error, "Cannot host clip: clip ID is null or empty.");
+
+                return false;
+            }
+
+            // Critical validation: Ensure the HTTP server is running before hosting
+            if (!IsServerRunning) {
+                _logger.Log(LogLevel.Error,
+                            "Cannot host clip: HTTP server is not running. Attempting to start server...");
+
+                try {
+                    StartServer();
+
+                    if (!IsServerRunning) {
+                        _logger.Log(LogLevel.Error, "Cannot host clip: Failed to start HTTP server.");
+
+                        return false;
+                    }
+                } catch (Exception ex) {
+                    _logger.Log(LogLevel.Error, "Cannot host clip: Failed to start HTTP server.", ex);
+
+                    return false;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(clipData.Title))
+                _logger.Log(LogLevel.Warn, "Clip title is null or empty, but proceeding with hosting.");
+
+            _clipData = clipData;
+            _logger.Log(LogLevel.Info,
+                        $"Successfully prepared clip '{clipData.Title}' (ID: {clipData.Id}) for hosting at {ServerUrl}");
+
+            return true;
         } catch (Exception ex) {
-            _logger.Log(LogLevel.Error, "Error while hosting clip.", ex);
+            _logger.Log(LogLevel.Error, "Error while preparing clip for hosting.", ex);
+
+            return false;
         }
     }
 
