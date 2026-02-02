@@ -1,0 +1,73 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>net481</TargetFramework>
+        <RootNamespace>Cliparino</RootNamespace>
+        <!--        <ImplicitUsings>enable</ImplicitUsings>-->
+        <ImplicitUsings>disable</ImplicitUsings>
+        <LangVersion>7.3</LangVersion>
+        <!-- Ignore CS0114 errors -->
+        <NoWarn>CS0114</NoWarn>
+        <!-- <EnableDefaultCompileItems>false</EnableDefaultCompileItems>-->
+    </PropertyGroup>
+    <ItemGroup>
+        <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+    </ItemGroup>
+    <ItemGroup>
+        <!-- Include all DLLs in a specific directory in the build output -->
+        <Reference Include="$(SystemRoot)\Microsoft.NET\Framework64\v4.0.30319\System.dll"/>
+        <Reference Include="$(SystemRoot)\Microsoft.NET\Framework64\v4.0.30319\System.Core.dll"/>
+        <Reference Include="$(SystemRoot)\Microsoft.NET\Framework64\v4.0.30319\System.Net.dll"/>
+        <Reference Include="$(SystemRoot)\Microsoft.NET\Framework64\v4.0.30319\System.Net.Http.dll"/>
+        <Reference Include="$(SystemRoot)\Microsoft.NET\Framework64\v4.0.30319\netstandard.dll"/>
+        <Reference Include="$(SystemRoot)\Microsoft.NET\Framework64\v4.0.30319\System.Windows.Forms.dll"/>
+        <Reference Include="$(SystemRoot)\Microsoft.NET\Framework64\v4.0.30319\System.Drawing.dll"/>
+        <Reference Include="$(SystemRoot)\Microsoft.NET\Framework64\v4.0.30319\Microsoft.VisualBasic.dll"/>
+        <Reference Include="$(SystemRoot)\Microsoft.NET\Framework64\v4.0.30319\Microsoft.CSharp.dll"/>
+        <!-- List of dlls included with Streamer.bot -->
+        <Reference Include="$(AppData)\Streamer.bot\Streamer.bot.Plugin.Interface.dll"/>
+        <Reference Include="$(AppData)\Streamer.bot\Streamer.bot.Common.dll"/>
+        <Reference Include="$(AppData)\Streamer.bot\Streamer.bot.Auth.dll"/>
+        <Reference Include="$(AppData)\Streamer.bot\Streamer.bot.EmoteHandlers.dll"/>
+        <Reference Include="$(AppData)\Streamer.bot\NAudio.dll"/>
+        <Reference Include="$(AppData)\Streamer.bot\NAudio.Core.dll"/>
+        <Reference Include="$(AppData)\Streamer.bot\Newtonsoft.Json.dll"/>
+        <Reference Include="$(AppData)\Streamer.bot\Twitch.Common.dll"/>
+        <Reference Include="$(AppData)\Streamer.bot\websocket-sharp.dll"/>
+        <!-- Example of a dll in the Streamer.bot dlls folder -->
+        <!-- <Reference Include="D:\overlays\streamerbot\dlls\SharpOSC.dll" /> -->
+    </ItemGroup>
+    <ItemGroup>
+        <Compile Remove="src\CPHInline_Old.cs"/>
+        <Compile Remove="tests\sbTestBed.cs"/>
+        <Compile Remove="src\Utilities\CPH.cs"/>
+        <Compile Remove="src\Utilities\ReferenceFile.cs"/>
+        <Compile Remove="src\rCPHInline.cs"/>
+        <Compile Remove="src\Utilities\OBSManager.cs"/>
+        <Compile Remove="Cliparino2\**"/>
+        <Compile Remove="Cliparino\obj\Debug\net8.0\.NETCoreApp,Version=v8.0.AssemblyAttributes.cs"/>
+        <Compile Remove="Cliparino\src\Utilities\CPH.cs"/>
+        <Compile Remove="Cliparino\src\Utilities\OBSManager.cs"/>
+        <Compile Remove="Cliparino2\**"/>
+        <Compile Remove="Cliparino\obj\Debug\net8.0\.NETCoreApp,Version=v8.0.AssemblyAttributes.cs"/>
+        <Compile Remove="Cliparino\src\Utilities\CPH.cs"/>
+        <Compile Remove="Cliparino\src\Utilities\OBSManager.cs"/>
+    </ItemGroup>
+    <ItemGroup>
+        <Folder Include="src\Utilities\"/>
+        <Folder Include="tests\"/>
+    </ItemGroup>
+    <ItemGroup>
+        <None Remove="Cliparino.csproj.DotSettings"/>
+        <None Remove="Cliparino2\**"/>
+    </ItemGroup>
+    <ItemGroup>
+        <EmbeddedResource Remove="Cliparino2\**"/>
+        <None Remove="Cliparino2\**"/>
+    </ItemGroup>
+    <ItemGroup>
+        <EmbeddedResource Remove="Cliparino2\**"/>
+    </ItemGroup>
+</Project>

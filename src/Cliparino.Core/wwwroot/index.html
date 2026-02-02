@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <link href="/index.css" rel="stylesheet" type="text/css">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <title>Cliparino</title>
+</head>
+<body>
+<div id="twitch-embed">
+    <div class="iframe-container">
+        <iframe allowfullscreen autoplay="true" controls="false" height="1080" id="clip-iframe" mute="false"
+                preload="auto"
+                src="https://clips.twitch.tv/embed?clip={{clipId}}&autoplay=true&parent=localhost" title="Cliparino"
+                width="1920">
+        </iframe>
+        <div class="overlay-text" id="overlay-text">
+            <div class="line1">{{streamerName}} doin' a heckin' {{gameName}} stream</div>
+            <div class="line2">{{clipTitle}}</div>
+            <div class="line3">by {{curatorName}}</div>
+        </div>
+    </div>
+</div>
+<script src="/player.js"></script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cliparino", "Cliparino.csproj", "{FD19362D-2013-08F8-3B53-8C2BBC069ECD}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{FD19362D-2013-08F8-3B53-8C2BBC069ECD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FD19362D-2013-08F8-3B53-8C2BBC069ECD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FD19362D-2013-08F8-3B53-8C2BBC069ECD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FD19362D-2013-08F8-3B53-8C2BBC069ECD}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {BD3C28B6-F239-4928-AABC-A1860D05B172}
+	EndGlobalSection
+EndGlobal

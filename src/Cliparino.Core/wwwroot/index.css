@@ -1,0 +1,53 @@
+div {
+    background-color: #0071c5;
+    background-color: rgba(0, 113, 197, 1);
+    margin: 0 auto;
+    overflow: hidden;
+}
+
+#twitch-embed {
+    display: block;
+}
+
+.iframe-container {
+    height: 1080px;
+    position: relative;
+    width: 1920px;
+}
+
+#clip-iframe {
+    height: 100%;
+    left: 0;
+    position: absolute;
+    top: 0;
+    width: 100%;
+}
+
+#overlay-text {
+    background-color: #042239;
+    background-color: rgba(4, 34, 57, 0.7071);
+    border-radius: 5px;
+    color: #ffb809;
+    left: 5%;
+    opacity: 0.5;
+    padding: 10px;
+    position: absolute;
+    top: 80%;
+}
+
+.line1, .line2, .line3 {
+    font-family: 'Open Sans', sans-serif;
+    font-size: 2em;
+}
+
+.line1 {
+    font: normal 600 2em/1.2 'OpenDyslexic', 'Open Sans', sans-serif;
+}
+
+.line2 {
+    font: normal 400 1.5em/1.2 'OpenDyslexic', 'Open Sans', sans-serif;
+}
+
+.line3 {
+    font: italic 100 1em/1 'OpenDyslexic', 'Open Sans', sans-serif;
+}

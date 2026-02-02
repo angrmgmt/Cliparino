@@ -1,0 +1,241 @@
+using System.Text.RegularExpressions;
+using Cliparino.Core.Models;
+
+namespace Cliparino.Core.Services;
+
+public class CommandRouter : ICommandRouter {
+    private static readonly Regex ClipUrlRegex = new(
+        @"(?:https?://)?(?:www\.)?(?:clips\.twitch\.tv/|twitch\.tv/\w+/clip/)([a-zA-Z0-9_-]+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled
+    );
+
+    private readonly IApprovalService _approvalService;
+    private readonly IClipSearchService _clipSearchService;
+    private readonly IConfiguration _configuration;
+    private readonly ITwitchHelixClient _helixClient;
+    private readonly ILogger<CommandRouter> _logger;
+    private readonly IPlaybackEngine _playbackEngine;
+    private readonly IShoutoutService _shoutoutService;
+
+    public CommandRouter(
+        IPlaybackEngine playbackEngine,
+        ITwitchHelixClient helixClient,
+        IShoutoutService shoutoutService,
+        IClipSearchService clipSearchService,
+        IApprovalService approvalService,
+        IConfiguration configuration,
+        ILogger<CommandRouter> logger
+    ) {
+        _playbackEngine = playbackEngine;
+        _helixClient = helixClient;
+        _shoutoutService = shoutoutService;
+        _clipSearchService = clipSearchService;
+        _approvalService = approvalService;
+        _configuration = configuration;
+        _logger = logger;
+    }
+
+    public ChatCommand? ParseCommand(ChatMessage message) {
+        var text = message.Message.TrimStart();
+
+        if (!text.StartsWith('!'))
+            return null;
+
+        var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        if (parts.Length == 0)
+            return null;
+
+        var command = parts[0].ToLowerInvariant();
+
+        return command switch {
+            "!watch" => ParseWatchCommand(message, parts),
+            "!stop" => new StopCommand(message),
+            "!replay" => new ReplayCommand(message),
+            "!so" or "!shoutout" => ParseShoutoutCommand(message, parts),
+            _ => null
+        };
+    }
+
+    public async Task ExecuteCommandAsync(ChatCommand command, CancellationToken cancellationToken = default) {
+        try {
+            switch (command) {
+                case WatchClipCommand watch:
+                    await ExecuteWatchClipAsync(watch, cancellationToken);
+
+                    break;
+
+                case WatchSearchCommand search:
+                    await ExecuteWatchSearchAsync(search, cancellationToken);
+
+                    break;
+
+                case StopCommand:
+                    await ExecuteStopAsync(cancellationToken);
+
+                    break;
+
+                case ReplayCommand:
+                    await ExecuteReplayAsync(cancellationToken);
+
+                    break;
+
+                case ShoutoutCommand shoutout:
+                    await ExecuteShoutoutAsync(shoutout, cancellationToken);
+
+                    break;
+
+                default:
+                    _logger.LogWarning("Unknown command type: {CommandType}", command.GetType().Name);
+
+                    break;
+            }
+        } catch (Exception ex) {
+            _logger.LogError(ex, "Error executing command: {Command}", command);
+        }
+    }
+
+    public async Task ProcessChatMessageAsync(ChatMessage message, CancellationToken cancellationToken = default) {
+        await _approvalService.ProcessApprovalResponseAsync(message);
+
+        var command = ParseCommand(message);
+        if (command != null) await ExecuteCommandAsync(command, cancellationToken);
+    }
+
+    private ChatCommand? ParseWatchCommand(ChatMessage message, string[] parts) {
+        if (parts.Length < 2)
+            return null;
+
+        var clipUrlMatch = ClipUrlRegex.Match(message.Message);
+
+        if (clipUrlMatch.Success) return new WatchClipCommand(message, clipUrlMatch.Groups[1].Value);
+
+        if (parts[1].StartsWith('@')) {
+            var broadcasterName = parts[1].TrimStart('@');
+            var searchTerms = string.Join(' ', parts.Skip(2));
+
+            if (string.IsNullOrWhiteSpace(searchTerms))
+                return null;
+
+            return new WatchSearchCommand(message, broadcasterName, searchTerms);
+        }
+
+        return new WatchClipCommand(message, parts[1]);
+    }
+
+    private ChatCommand? ParseShoutoutCommand(ChatMessage message, string[] parts) {
+        if (parts.Length < 2)
+            return null;
+
+        var targetUsername = parts[1].TrimStart('@');
+
+        return new ShoutoutCommand(message, targetUsername);
+    }
+
+    private async Task ExecuteWatchClipAsync(WatchClipCommand command, CancellationToken cancellationToken) {
+        _logger.LogInformation(
+            "Executing watch clip command: {ClipId} (requested by {User})",
+            command.ClipIdentifier, command.Source.DisplayName
+        );
+
+        var clipData = await _helixClient.GetClipByIdAsync(command.ClipIdentifier);
+
+        if (clipData == null) clipData = await _helixClient.GetClipByUrlAsync(command.ClipIdentifier);
+
+        if (clipData == null) {
+            _logger.LogWarning("Clip not found: {ClipId}", command.ClipIdentifier);
+
+            return;
+        }
+
+        await _playbackEngine.PlayClipAsync(clipData, cancellationToken);
+        _logger.LogInformation(
+            "Clip enqueued: {ClipTitle} by {Broadcaster}",
+            clipData.Title, clipData.BroadcasterName
+        );
+    }
+
+    private async Task ExecuteWatchSearchAsync(WatchSearchCommand command, CancellationToken cancellationToken) {
+        _logger.LogInformation(
+            "Executing watch search command: @{Broadcaster} {SearchTerms} (requested by {User})",
+            command.BroadcasterName, command.SearchTerms, command.Source.DisplayName
+        );
+
+        var clip = await _clipSearchService.SearchClipAsync(
+            command.BroadcasterName,
+            command.SearchTerms,
+            cancellationToken
+        );
+
+        if (clip == null) {
+            _logger.LogWarning(
+                "No clips found for search: @{Broadcaster} {SearchTerms}",
+                command.BroadcasterName, command.SearchTerms
+            );
+
+            return;
+        }
+
+        if (_approvalService.IsApprovalRequired(command.Source)) {
+            _logger.LogInformation("Approval required for clip search by {User}", command.Source.DisplayName);
+
+            var approvalTimeout = TimeSpan.FromSeconds(
+                _configuration.GetValue("ClipSearch:ApprovalTimeoutSeconds", 30)
+            );
+
+            var approved = await _approvalService.RequestApprovalAsync(
+                command.Source,
+                clip,
+                approvalTimeout,
+                cancellationToken
+            );
+
+            if (!approved) {
+                _logger.LogInformation(
+                    "Clip search request denied or timed out for {User}", command.Source.DisplayName
+                );
+
+                return;
+            }
+        }
+
+        await _playbackEngine.PlayClipAsync(clip, cancellationToken);
+        _logger.LogInformation(
+            "Clip enqueued from search: {ClipTitle} by {Broadcaster}",
+            clip.Title, clip.BroadcasterName
+        );
+    }
+
+    private async Task ExecuteStopAsync(CancellationToken cancellationToken) {
+        _logger.LogInformation("Executing stop command");
+        await _playbackEngine.StopPlaybackAsync(cancellationToken);
+    }
+
+    private async Task ExecuteReplayAsync(CancellationToken cancellationToken) {
+        _logger.LogInformation("Executing replay command");
+        await _playbackEngine.ReplayAsync(cancellationToken);
+    }
+
+    private async Task ExecuteShoutoutAsync(ShoutoutCommand command, CancellationToken cancellationToken) {
+        _logger.LogInformation(
+            "Executing shoutout command for @{TargetUser} (requested by {User})",
+            command.TargetUsername, command.Source.DisplayName
+        );
+
+        var sourceBroadcasterId = await _helixClient.GetAuthenticatedUserIdAsync();
+
+        if (string.IsNullOrEmpty(sourceBroadcasterId)) {
+            _logger.LogError("Could not get authenticated user ID for shoutout");
+
+            return;
+        }
+
+        var success = await _shoutoutService.ExecuteShoutoutAsync(
+            sourceBroadcasterId,
+            command.TargetUsername,
+            cancellationToken
+        );
+
+        if (!success) _logger.LogWarning("Shoutout execution failed for @{TargetUser}", command.TargetUsername);
+    }
+}

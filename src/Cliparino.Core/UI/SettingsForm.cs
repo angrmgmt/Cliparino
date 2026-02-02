@@ -1,13 +1,10 @@
-﻿using System.Text.Json;
+﻿using System.Globalization;
+using System.Text.Json;
 
 namespace Cliparino.Core.UI;
 
-public class SettingsForm : Form
-{
+public class SettingsForm : Form {
     private readonly IConfiguration _configuration;
-    private readonly IServiceProvider _services;
-    private Button _cancelButton = null!;
-    private CheckBox _enableDebugLoggingCheckBox = null!;
 
     private CheckBox _enableShoutoutMessageCheckBox = null!;
     private NumericUpDown _heightNumeric = null!;
@@ -19,28 +16,22 @@ public class SettingsForm : Form
     private TextBox _obsHostTextBox = null!;
     private TextBox _obsPasswordTextBox = null!;
     private NumericUpDown _obsPortNumeric = null!;
-    private Button _saveButton = null!;
 
     private TextBox _sceneNameTextBox = null!;
     private TextBox _shoutoutMessageTemplateTextBox = null!;
     private TextBox _sourceNameTextBox = null!;
-
-    private TabControl _tabControl = null!;
-    private Button _testObsConnectionButton = null!;
     private CheckBox _useFeaturedClipsCheckBox = null!;
     private NumericUpDown _widthNumeric = null!;
 
-    public SettingsForm(IServiceProvider services)
-    {
-        _services = services;
+    public SettingsForm(IServiceProvider services) {
+        _ = services;
         _configuration = services.GetRequiredService<IConfiguration>();
 
         InitializeComponents();
         LoadSettings();
     }
 
-    private void InitializeComponents()
-    {
+    private void InitializeComponents() {
         Text = "Cliparino Settings";
         Size = new Size(600, 500);
         StartPosition = FormStartPosition.CenterScreen;
@@ -48,45 +39,41 @@ public class SettingsForm : Form
         MaximizeBox = false;
         MinimizeBox = false;
 
-        _tabControl = new TabControl
-        {
+        var tabControl = new TabControl {
             Dock = DockStyle.Top,
             Height = 400
         };
 
-        _tabControl.TabPages.Add(CreateObsTab());
-        _tabControl.TabPages.Add(CreatePlayerTab());
-        _tabControl.TabPages.Add(CreateShoutoutTab());
-        _tabControl.TabPages.Add(CreateLoggingTab());
-        _tabControl.TabPages.Add(CreateTwitchTab());
+        tabControl.TabPages.Add(CreateObsTab());
+        tabControl.TabPages.Add(CreatePlayerTab());
+        tabControl.TabPages.Add(CreateShoutoutTab());
+        tabControl.TabPages.Add(CreateLoggingTab());
+        tabControl.TabPages.Add(CreateTwitchTab());
 
-        _saveButton = new Button
-        {
+        var saveButton = new Button {
             Text = "Save",
             DialogResult = DialogResult.OK,
             Location = new Point(400, 420),
             Size = new Size(80, 30)
         };
-        _saveButton.Click += SaveButton_Click;
+        saveButton.Click += SaveButton_Click;
 
-        _cancelButton = new Button
-        {
+        var cancelButton = new Button {
             Text = "Cancel",
             DialogResult = DialogResult.Cancel,
             Location = new Point(490, 420),
             Size = new Size(80, 30)
         };
 
-        Controls.Add(_tabControl);
-        Controls.Add(_saveButton);
-        Controls.Add(_cancelButton);
+        Controls.Add(tabControl);
+        Controls.Add(saveButton);
+        Controls.Add(cancelButton);
 
-        AcceptButton = _saveButton;
-        CancelButton = _cancelButton;
+        AcceptButton = saveButton;
+        CancelButton = cancelButton;
     }
 
-    private TabPage CreateObsTab()
-    {
+    private TabPage CreateObsTab() {
         var tab = new TabPage("OBS Connection");
         var panel = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(10) };
 
@@ -108,16 +95,17 @@ public class SettingsForm : Form
         panel.Controls.Add(_obsPasswordTextBox);
         y += 30;
 
-        _testObsConnectionButton = new Button { Text = "Test Connection", Location = new Point(170, y), Width = 150 };
-        _testObsConnectionButton.Click += TestObsConnection_Click;
-        panel.Controls.Add(_testObsConnectionButton);
+        var testObsConnectionButton = new Button
+            { Text = "Test Connection", Location = new Point(170, y), Width = 150 };
+        testObsConnectionButton.Click += TestObsConnection_Click;
+        panel.Controls.Add(testObsConnectionButton);
 
         tab.Controls.Add(panel);
+
         return tab;
     }
 
-    private TabPage CreatePlayerTab()
-    {
+    private TabPage CreatePlayerTab() {
         var tab = new TabPage("Player Settings");
         var panel = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(10) };
 
@@ -145,18 +133,17 @@ public class SettingsForm : Form
         panel.Controls.Add(_heightNumeric);
 
         tab.Controls.Add(panel);
+
         return tab;
     }
 
-    private TabPage CreateShoutoutTab()
-    {
+    private TabPage CreateShoutoutTab() {
         var tab = new TabPage("Shoutouts");
         var panel = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(10) };
 
         var y = 10;
 
-        _enableShoutoutMessageCheckBox = new CheckBox
-        {
+        _enableShoutoutMessageCheckBox = new CheckBox {
             Text = "Enable shoutout messages",
             Location = new Point(10, y),
             Width = 300
@@ -166,8 +153,7 @@ public class SettingsForm : Form
 
         panel.Controls.Add(new Label { Text = "Message Template:", Location = new Point(10, y), Width = 150 });
         y += 20;
-        _shoutoutMessageTemplateTextBox = new TextBox
-        {
+        _shoutoutMessageTemplateTextBox = new TextBox {
             Location = new Point(10, y),
             Width = 500,
             Height = 60,
@@ -177,8 +163,7 @@ public class SettingsForm : Form
         panel.Controls.Add(_shoutoutMessageTemplateTextBox);
         y += 70;
 
-        _useFeaturedClipsCheckBox = new CheckBox
-        {
+        _useFeaturedClipsCheckBox = new CheckBox {
             Text = "Prefer featured clips",
             Location = new Point(10, y),
             Width = 300
@@ -187,8 +172,7 @@ public class SettingsForm : Form
         y += 30;
 
         panel.Controls.Add(new Label { Text = "Max Clip Length (seconds):", Location = new Point(10, y), Width = 180 });
-        _maxClipLengthNumeric = new NumericUpDown
-        {
+        _maxClipLengthNumeric = new NumericUpDown {
             Location = new Point(200, y),
             Width = 100,
             Minimum = 5,
@@ -199,8 +183,7 @@ public class SettingsForm : Form
         y += 30;
 
         panel.Controls.Add(new Label { Text = "Max Clip Age (days):", Location = new Point(10, y), Width = 180 });
-        _maxClipAgeNumeric = new NumericUpDown
-        {
+        _maxClipAgeNumeric = new NumericUpDown {
             Location = new Point(200, y),
             Width = 100,
             Minimum = 1,
@@ -210,48 +193,45 @@ public class SettingsForm : Form
         panel.Controls.Add(_maxClipAgeNumeric);
 
         tab.Controls.Add(panel);
+
         return tab;
     }
 
-    private TabPage CreateLoggingTab()
-    {
+    private TabPage CreateLoggingTab() {
         var tab = new TabPage("Logging");
         var panel = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(10) };
 
         var y = 10;
 
         panel.Controls.Add(new Label { Text = "Log Level:", Location = new Point(10, y), Width = 150 });
-        _logLevelComboBox = new ComboBox
-        {
+        _logLevelComboBox = new ComboBox {
             Location = new Point(170, y),
             Width = 200,
             DropDownStyle = ComboBoxStyle.DropDownList
         };
-        _logLevelComboBox.Items.AddRange(new[] { "Debug", "Information", "Warning", "Error" });
+        _logLevelComboBox.Items.AddRange(["Debug", "Information", "Warning", "Error"]);
         panel.Controls.Add(_logLevelComboBox);
         y += 30;
 
-        _enableDebugLoggingCheckBox = new CheckBox
-        {
+        var enableDebugLoggingCheckBox = new CheckBox {
             Text = "Enable debug logging",
             Location = new Point(10, y),
             Width = 300
         };
-        panel.Controls.Add(_enableDebugLoggingCheckBox);
+        panel.Controls.Add(enableDebugLoggingCheckBox);
 
         tab.Controls.Add(panel);
+
         return tab;
     }
 
-    private TabPage CreateTwitchTab()
-    {
+    private TabPage CreateTwitchTab() {
         var tab = new TabPage("Twitch");
         var panel = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(10) };
 
         var y = 10;
 
-        var loginButton = new Button
-        {
+        var loginButton = new Button {
             Text = "Connect Twitch Account",
             Location = new Point(10, y),
             Size = new Size(200, 40)
@@ -260,8 +240,7 @@ public class SettingsForm : Form
         panel.Controls.Add(loginButton);
         y += 50;
 
-        var statusLabel = new Label
-        {
+        var statusLabel = new Label {
             Text = "Status: Not connected",
             Location = new Point(10, y),
             Width = 400,
@@ -270,11 +249,11 @@ public class SettingsForm : Form
         panel.Controls.Add(statusLabel);
 
         tab.Controls.Add(panel);
+
         return tab;
     }
 
-    private void LoadSettings()
-    {
+    private void LoadSettings() {
         _obsHostTextBox.Text = _configuration["Obs:Host"] ?? "localhost";
         _obsPortNumeric.Value = int.Parse(_configuration["Obs:Port"] ?? "4455");
         _obsPasswordTextBox.Text = _configuration["Obs:Password"] ?? "";
@@ -292,36 +271,33 @@ public class SettingsForm : Form
         _maxClipAgeNumeric.Value = int.Parse(_configuration["Shoutout:MaxClipAge"] ?? "30");
 
         _logLevelComboBox.SelectedItem = _configuration["Logging:LogLevel:Default"] ?? "Information";
-        _enableDebugLoggingCheckBox.Checked = _logLevelComboBox.SelectedItem?.ToString() == "Debug";
     }
 
-    private void SaveButton_Click(object? sender, EventArgs e)
-    {
-        var settings = new Dictionary<string, string>
-        {
+    private void SaveButton_Click(object? sender, EventArgs e) {
+        var settings = new Dictionary<string, string> {
             ["Obs:Host"] = _obsHostTextBox.Text,
-            ["Obs:Port"] = _obsPortNumeric.Value.ToString(),
+            ["Obs:Port"] = _obsPortNumeric.Value.ToString(CultureInfo.InvariantCulture),
             ["Obs:Password"] = _obsPasswordTextBox.Text,
             ["Player:SceneName"] = _sceneNameTextBox.Text,
             ["Player:SourceName"] = _sourceNameTextBox.Text,
-            ["Player:Width"] = _widthNumeric.Value.ToString(),
-            ["Player:Height"] = _heightNumeric.Value.ToString(),
+            ["Player:Width"] = _widthNumeric.Value.ToString(CultureInfo.InvariantCulture),
+            ["Player:Height"] = _heightNumeric.Value.ToString(CultureInfo.InvariantCulture),
             ["Shoutout:EnableMessage"] = _enableShoutoutMessageCheckBox.Checked.ToString(),
             ["Shoutout:MessageTemplate"] = _shoutoutMessageTemplateTextBox.Text,
             ["Shoutout:UseFeaturedClips"] = _useFeaturedClipsCheckBox.Checked.ToString(),
-            ["Shoutout:MaxClipLength"] = _maxClipLengthNumeric.Value.ToString(),
-            ["Shoutout:MaxClipAge"] = _maxClipAgeNumeric.Value.ToString(),
+            ["Shoutout:MaxClipLength"] = _maxClipLengthNumeric.Value.ToString(CultureInfo.InvariantCulture),
+            ["Shoutout:MaxClipAge"] = _maxClipAgeNumeric.Value.ToString(CultureInfo.InvariantCulture),
             ["Logging:LogLevel:Default"] = _logLevelComboBox.SelectedItem?.ToString() ?? "Information"
         };
 
         var configPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
 
-        try
-        {
-            var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions
-            {
-                WriteIndented = true
-            });
+        try {
+            var json = JsonSerializer.Serialize(
+                settings, new JsonSerializerOptions {
+                    WriteIndented = true
+                }
+            );
 
             File.WriteAllText(configPath, json);
 
@@ -329,46 +305,45 @@ public class SettingsForm : Form
                 "Settings saved successfully.\n\nPlease restart Cliparino for changes to take effect.",
                 "Settings Saved",
                 MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+                MessageBoxIcon.Information
+            );
 
             Close();
-        }
-        catch (Exception ex)
-        {
+        } catch (Exception ex) {
             MessageBox.Show(
                 $"Failed to save settings:\n{ex.Message}",
                 "Error",
                 MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
+                MessageBoxIcon.Error
+            );
         }
     }
 
-    private void TestObsConnection_Click(object? sender, EventArgs e)
-    {
-        _testObsConnectionButton.Enabled = false;
-        _testObsConnectionButton.Text = "Testing...";
+    private void TestObsConnection_Click(object? sender, EventArgs e) {
+        if (sender is Button button) {
+            button.Enabled = false;
+            button.Text = "Testing...";
 
-        try
-        {
-            MessageBox.Show(
-                "OBS connection testing not yet implemented.\n\nPlease ensure OBS is running with WebSocket server enabled.",
-                "Test Connection",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
-        }
-        finally
-        {
-            _testObsConnectionButton.Enabled = true;
-            _testObsConnectionButton.Text = "Test Connection";
+            try {
+                MessageBox.Show(
+                    "OBS connection testing not yet implemented.\n\nPlease ensure OBS is running with WebSocket server enabled.",
+                    "Test Connection",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+            } finally {
+                button.Enabled = true;
+                button.Text = "Test Connection";
+            }
         }
     }
 
-    private void TwitchLogin_Click(object? sender, EventArgs e)
-    {
+    private void TwitchLogin_Click(object? sender, EventArgs e) {
         MessageBox.Show(
             "Twitch authentication will open in your default browser.\n\nPlease log in and authorize Cliparino.",
             "Twitch Login",
             MessageBoxButtons.OK,
-            MessageBoxIcon.Information);
+            MessageBoxIcon.Information
+        );
     }
 }

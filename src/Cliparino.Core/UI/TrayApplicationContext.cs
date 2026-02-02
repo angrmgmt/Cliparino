@@ -3,17 +3,15 @@ using Cliparino.Core.Services;
 
 namespace Cliparino.Core.UI;
 
-public class TrayApplicationContext : ApplicationContext
-{
+public class TrayApplicationContext : ApplicationContext {
     private readonly IServiceProvider _services;
     private readonly NotifyIcon _trayIcon;
+    private bool _isCheckingForUpdates;
     private SettingsForm? _settingsForm;
 
-    public TrayApplicationContext(IServiceProvider services)
-    {
+    public TrayApplicationContext(IServiceProvider services) {
         _services = services;
-        _trayIcon = new NotifyIcon
-        {
+        _trayIcon = new NotifyIcon {
             Icon = SystemIcons.Application,
             Text = "Cliparino - Twitch Clip Player",
             Visible = true,
@@ -23,12 +21,13 @@ public class TrayApplicationContext : ApplicationContext
         _trayIcon.DoubleClick += OnTrayIconDoubleClick;
     }
 
-    private ContextMenuStrip CreateContextMenu()
-    {
+    private ContextMenuStrip CreateContextMenu() {
         var menu = new ContextMenuStrip();
 
-        menu.Items.Add("Open Player Page", null, (s, e) =>
-            Process.Start(new ProcessStartInfo("http://localhost:5290") { UseShellExecute = true }));
+        menu.Items.Add(
+            "Open Player Page", null, (_, _) =>
+                Process.Start(new ProcessStartInfo("http://localhost:5290") { UseShellExecute = true })
+        );
 
         menu.Items.Add(new ToolStripSeparator());
 
@@ -55,27 +54,21 @@ public class TrayApplicationContext : ApplicationContext
         return menu;
     }
 
-    private void OnTrayIconDoubleClick(object? sender, EventArgs e)
-    {
+    private void OnTrayIconDoubleClick(object? sender, EventArgs e) {
         OpenSettings(sender, e);
     }
 
-    private void OpenSettings(object? sender, EventArgs e)
-    {
-        if (_settingsForm == null || _settingsForm.IsDisposed)
-        {
+    private void OpenSettings(object? sender, EventArgs e) {
+        if (_settingsForm == null || _settingsForm.IsDisposed) {
             _settingsForm = new SettingsForm(_services);
             _settingsForm.Show();
-        }
-        else
-        {
+        } else {
             _settingsForm.BringToFront();
             _settingsForm.Activate();
         }
     }
 
-    private void OpenLogs(object? sender, EventArgs e)
-    {
+    private static void OpenLogs(object? sender, EventArgs e) {
         var logsPath = Path.Combine(AppContext.BaseDirectory, "logs");
         if (Directory.Exists(logsPath))
             Process.Start(new ProcessStartInfo(logsPath) { UseShellExecute = true });
@@ -83,45 +76,46 @@ public class TrayApplicationContext : ApplicationContext
             MessageBox.Show("Logs directory not found.", "Cliparino", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
-    private async void ExportDiagnostics(object? sender, EventArgs e)
-    {
-        var diagnosticsService = _services.GetService<IDiagnosticsService>();
-        if (diagnosticsService == null)
-        {
-            MessageBox.Show("Diagnostics service unavailable.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return;
-        }
+    private async void ExportDiagnostics(object? sender, EventArgs e) {
+        try {
+            var diagnosticsService = _services.GetService<IDiagnosticsService>();
 
-        try
-        {
+            if (diagnosticsService == null) {
+                MessageBox.Show(
+                    "Diagnostics service unavailable.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error
+                );
+
+                return;
+            }
+
             var outputPath = await diagnosticsService.ExportDiagnosticsAsync();
             var result = MessageBox.Show(
                 $"Diagnostics exported to:\n{outputPath}\n\nOpen folder?",
                 "Cliparino",
                 MessageBoxButtons.YesNo,
-                MessageBoxIcon.Information);
+                MessageBoxIcon.Information
+            );
 
             if (result == DialogResult.Yes)
                 Process.Start(new ProcessStartInfo(Path.GetDirectoryName(outputPath)!) { UseShellExecute = true });
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"Failed to export diagnostics:\n{ex.Message}", "Error", MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
+        } catch (Exception ex) {
+            MessageBox.Show(
+                $"Failed to export diagnostics:\n{ex.Message}", "Error", MessageBoxButtons.OK,
+                MessageBoxIcon.Error
+            );
         }
     }
 
-    private void ViewStatus(object? sender, EventArgs e)
-    {
+    private static void ViewStatus(object? sender, EventArgs e) {
         Process.Start(new ProcessStartInfo("http://localhost:5290/api/status") { UseShellExecute = true });
     }
 
-    private void ViewQueue(object? sender, EventArgs e)
-    {
+    private void ViewQueue(object? sender, EventArgs e) {
         var playbackEngine = _services.GetService<IPlaybackEngine>();
-        if (playbackEngine == null)
-        {
+
+        if (playbackEngine == null) {
             MessageBox.Show("Playback engine unavailable.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+
             return;
         }
 
@@ -135,44 +129,53 @@ public class TrayApplicationContext : ApplicationContext
         MessageBox.Show(message, "Cliparino Status", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
-    private async void CheckForUpdates(object? sender, EventArgs e)
-    {
-        var updateChecker = _services.GetService<IUpdateChecker>();
-        if (updateChecker == null)
-        {
-            MessageBox.Show("Update checker unavailable.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return;
-        }
+    private async void CheckForUpdates(object? sender, EventArgs e) {
+        if (_isCheckingForUpdates) return;
+        _isCheckingForUpdates = true;
 
-        try
-        {
+        try {
+            var updateChecker = _services.GetService<IUpdateChecker>();
+
+            if (updateChecker == null) {
+                MessageBox.Show("Update checker unavailable.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+
+                return;
+            }
+
             var updateInfo = await updateChecker.CheckForUpdatesAsync();
-            if (updateInfo?.IsNewer == true)
-            {
+
+            if (updateInfo == null) {
+                MessageBox.Show(
+                    "Could not check for updates. Please try again later.", "Error", MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+            } else if (updateInfo.IsNewer) {
                 var result = MessageBox.Show(
                     $"A new version is available: {updateInfo.LatestVersion}\n\nWould you like to download it?",
                     "Update Available",
                     MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Information);
+                    MessageBoxIcon.Information
+                );
 
                 if (result == DialogResult.Yes)
                     Process.Start(new ProcessStartInfo(updateInfo.ReleaseUrl) { UseShellExecute = true });
+            } else {
+                MessageBox.Show(
+                    "You are running the latest version.", "No Updates", MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
             }
-            else
-            {
-                MessageBox.Show("You are running the latest version.", "No Updates", MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-            }
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"Failed to check for updates:\n{ex.Message}", "Error", MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
+        } catch (Exception ex) {
+            MessageBox.Show(
+                $"Failed to check for updates:\n{ex.Message}", "Error", MessageBoxButtons.OK,
+                MessageBoxIcon.Error
+            );
+        } finally {
+            _isCheckingForUpdates = false;
         }
     }
 
-    private void ShowAbout(object? sender, EventArgs e)
-    {
+    private static void ShowAbout(object? sender, EventArgs e) {
         var version = typeof(TrayApplicationContext).Assembly.GetName().Version;
         MessageBox.Show(
             $"Cliparino - Twitch Clip Player\n\n" +
@@ -182,20 +185,18 @@ public class TrayApplicationContext : ApplicationContext
             $"github.com/angrmgmt/Cliparino",
             "About Cliparino",
             MessageBoxButtons.OK,
-            MessageBoxIcon.Information);
+            MessageBoxIcon.Information
+        );
     }
 
-    private void Exit(object? sender, EventArgs e)
-    {
+    private void Exit(object? sender, EventArgs e) {
         _trayIcon.Visible = false;
         Application.Exit();
     }
 
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            _trayIcon?.Dispose();
+    protected override void Dispose(bool disposing) {
+        if (disposing) {
+            _trayIcon.Dispose();
             _settingsForm?.Dispose();
         }
 
