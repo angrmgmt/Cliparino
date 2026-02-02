@@ -5,11 +5,46 @@ using System.Text.RegularExpressions;
 
 namespace Cliparino.Core.Services;
 
+/// <summary>
+///     Collects and exports comprehensive diagnostic information for troubleshooting and support.
+/// </summary>
+/// <remarks>
+///     <para>
+///         This is the primary implementation of <see cref="IDiagnosticsService" />, providing both plaintext
+///         and ZIP-archived diagnostic exports.
+///     </para>
+///     <para>
+///         Key features:
+///         <list type="bullet">
+///             <item>Gathers system information (OS, runtime, machine name)</item>
+///             <item>Exports application configuration with automatic sensitive key redaction</item>
+///             <item>Includes recent log files (up to 3 most recent, with sensitive data filtered)</item>
+///             <item>Optionally includes component health status when <see cref="IHealthReporter" /> is available</item>
+///             <item>Uses regex-based sensitive data filtering to protect credentials in logs</item>
+///         </list>
+///     </para>
+///     <para>
+///         Dependencies:
+///         <list type="bullet">
+///             <item><see cref="IConfiguration" /> - Application configuration for export</item>
+///             <item><see cref="ILogger{DiagnosticsService}" /> - Logging errors during export</item>
+///             <item><see cref="IHealthReporter" /> (optional) - Component health status</item>
+///         </list>
+///     </para>
+///     <para>Thread-safety: Thread-safe. File and log directory operations are concurrent-safe by the OS.</para>
+///     <para>Lifecycle: Typically registered as Singleton and injected into diagnostic controllers.</para>
+/// </remarks>
 public partial class DiagnosticsService : IDiagnosticsService {
     private readonly IConfiguration _configuration;
     private readonly IHealthReporter? _healthReporter;
     private readonly ILogger<DiagnosticsService> _logger;
 
+    /// <summary>
+    ///     Initializes a new instance of the <see cref="DiagnosticsService" /> class.
+    /// </summary>
+    /// <param name="configuration">Application configuration provider.</param>
+    /// <param name="logger">Logger instance for recording export operations and errors.</param>
+    /// <param name="healthReporter">Optional health reporter instance. If null, health status is excluded from exports.</param>
     public DiagnosticsService(
         IConfiguration configuration,
         ILogger<DiagnosticsService> logger,
@@ -20,6 +55,7 @@ public partial class DiagnosticsService : IDiagnosticsService {
         _healthReporter = healthReporter;
     }
 
+    /// <inheritdoc />
     public async Task<string> ExportDiagnosticsAsync(CancellationToken cancellationToken = default) {
         var sb = new StringBuilder();
 
@@ -50,6 +86,7 @@ public partial class DiagnosticsService : IDiagnosticsService {
         return sb.ToString();
     }
 
+    /// <inheritdoc />
     public async Task<byte[]> ExportDiagnosticsZipAsync(CancellationToken cancellationToken = default) {
         using var memoryStream = new MemoryStream();
 
@@ -74,6 +111,17 @@ public partial class DiagnosticsService : IDiagnosticsService {
         return memoryStream.ToArray();
     }
 
+    /// <summary>
+    ///     Gets a JSON representation of application configuration with sensitive values redacted.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Scans all configuration keys and redacts values for keys matching patterns like
+    ///         "password", "secret", "token", "key", "clientid", etc. (case-insensitive).
+    ///     </para>
+    ///     <para>Redacted values show first 2 and last 2 characters with "***" in between for verification purposes.</para>
+    /// </remarks>
+    /// <returns>Pretty-printed JSON string with sensitive values redacted.</returns>
     private string GetRedactedConfiguration() {
         var configDict = new Dictionary<string, object?>();
 
@@ -86,6 +134,11 @@ public partial class DiagnosticsService : IDiagnosticsService {
         );
     }
 
+    /// <summary>
+    ///     Recursively processes a configuration section, redacting sensitive values.
+    /// </summary>
+    /// <param name="section">Configuration section to process.</param>
+    /// <returns>Dictionary or string representing the section, with sensitive values redacted.</returns>
     private object? GetRedactedSection(IConfigurationSection section) {
         if (!section.GetChildren().Any()) {
             var value = section.Value;
@@ -101,6 +154,11 @@ public partial class DiagnosticsService : IDiagnosticsService {
         return dict;
     }
 
+    /// <summary>
+    ///     Determines if a configuration key should have its value redacted for security.
+    /// </summary>
+    /// <param name="key">Configuration key name (case-insensitive).</param>
+    /// <returns>True if the key appears to contain sensitive information.</returns>
     private bool ShouldRedact(string key) {
         var sensitiveKeys = new[] {
             "password", "secret", "token", "key", "clientid", "clientsecret",
@@ -112,6 +170,11 @@ public partial class DiagnosticsService : IDiagnosticsService {
         );
     }
 
+    /// <summary>
+    ///     Redacts a sensitive configuration value while preserving partial visibility.
+    /// </summary>
+    /// <param name="value">The value to redact.</param>
+    /// <returns>Redacted version showing first/last 2 chars or "[REDACTED]"/"[EMPTY]".</returns>
     private string RedactValue(string value) {
         if (string.IsNullOrWhiteSpace(value))
             return "[EMPTY]";
@@ -122,6 +185,11 @@ public partial class DiagnosticsService : IDiagnosticsService {
         return $"{value[..2]}***{value[^2..]}";
     }
 
+    /// <summary>
+    ///     Retrieves recent log files (up to 3 most recent, with sensitive data redacted).
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token for the async operation.</param>
+    /// <returns>Formatted text containing recent log entries or an error message if logs are unavailable.</returns>
     private async Task<string> GetRecentLogsAsync(CancellationToken cancellationToken) {
         try {
             var logsPath = Path.Combine(Directory.GetCurrentDirectory(), "logs");
@@ -154,6 +222,12 @@ public partial class DiagnosticsService : IDiagnosticsService {
         }
     }
 
+    /// <summary>
+    ///     Adds recent log files to a ZIP archive for distribution, with sensitive data redacted.
+    /// </summary>
+    /// <param name="archive">ZIP archive to add log files to.</param>
+    /// <param name="cancellationToken">Cancellation token for the async operation.</param>
+    /// <remarks>Adds up to 3 most recent log files under a "logs/" directory in the archive.</remarks>
     private async Task AddRecentLogFilesAsync(ZipArchive archive, CancellationToken cancellationToken) {
         try {
             var logsPath = Path.Combine(Directory.GetCurrentDirectory(), "logs");
@@ -181,6 +255,22 @@ public partial class DiagnosticsService : IDiagnosticsService {
         }
     }
 
+    /// <summary>
+    ///     Redacts common sensitive patterns from log text (tokens, passwords, secrets).
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Uses compiled regex patterns to match and redact:
+    ///         <list type="bullet">
+    ///             <item>Bearer tokens: "Bearer [token_value]" → "Bearer [REDACTED]"</item>
+    ///             <item>Refresh tokens: "refresh_token=[value]" → "refresh_token=[REDACTED]"</item>
+    ///             <item>Client secrets: "client_secret=[value]" → "client_secret=[REDACTED]"</item>
+    ///             <item>Passwords: "password=[value]" → "password=[REDACTED]"</item>
+    ///         </list>
+    ///     </para>
+    /// </remarks>
+    /// <param name="text">The log text to redact.</param>
+    /// <returns>Log text with sensitive patterns replaced.</returns>
     private string RedactSensitiveData(string text) {
         text = AccessTokenRegex().Replace(text, "Bearer [REDACTED]");
         text = RefreshTokenRegex().Replace(text, "refresh_token=[REDACTED]");
@@ -190,6 +280,11 @@ public partial class DiagnosticsService : IDiagnosticsService {
         return text;
     }
 
+    /// <summary>
+    ///     Formats component health status as readable text for inclusion in diagnostics export.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token for the async operation.</param>
+    /// <returns>Formatted health status or error message if health reporter is unavailable.</returns>
     private async Task<string> GetHealthStatusAsync(CancellationToken cancellationToken) {
         if (_healthReporter == null)
             return "Health reporter not available";
@@ -209,15 +304,19 @@ public partial class DiagnosticsService : IDiagnosticsService {
         return sb.ToString();
     }
 
+    /// <summary>Regex pattern for matching Bearer tokens.</summary>
     [GeneratedRegex(@"Bearer\s+[\w\-\.]+", RegexOptions.IgnoreCase)]
     private static partial Regex AccessTokenRegex();
 
+    /// <summary>Regex pattern for matching refresh token parameters.</summary>
     [GeneratedRegex(@"refresh_token=[\w\-\.]+", RegexOptions.IgnoreCase)]
     private static partial Regex RefreshTokenRegex();
 
+    /// <summary>Regex pattern for matching client_secret parameters.</summary>
     [GeneratedRegex(@"client_secret=[\w\-\.]+", RegexOptions.IgnoreCase)]
     private static partial Regex ClientSecretRegex();
 
+    /// <summary>Regex pattern for matching password parameters.</summary>
     [GeneratedRegex(@"password=[\w\-\.]+", RegexOptions.IgnoreCase)]
     private static partial Regex PasswordRegex();
 }

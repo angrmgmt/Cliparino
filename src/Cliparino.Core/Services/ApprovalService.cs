@@ -3,6 +3,32 @@ using Cliparino.Core.Models;
 
 namespace Cliparino.Core.Services;
 
+/// <summary>
+///     Manages moderator approval workflows for clip search operations with timeout and response matching.
+/// </summary>
+/// <remarks>
+///     <para>
+///         This class implements <see cref="IApprovalService" /> using a concurrent dictionary to track
+///         pending approval requests. Each request has a unique ID and uses TaskCompletionSource for
+///         async waiting with timeout support.
+///     </para>
+///     <para>
+///         Response matching: Moderator responses are matched against known approval phrases ("yes", "yep", etc.)
+///         and denial phrases ("no", "nope", etc.) using case-insensitive comparison.
+///     </para>
+///     <para>
+///         Dependencies:
+///         - <see cref="ITwitchHelixClient" /> - Send approval request messages to chat
+///         - <see cref="IConfiguration" /> - Approval settings (timeout, exempt roles)
+///         - <see cref="ILogger{TCategoryName}" /> - Structured logging
+///     </para>
+///     <para>
+///         Thread-safety: Uses ConcurrentDictionary for thread-safe pending request tracking.
+///     </para>
+///     <para>
+///         Lifecycle: Registered as a singleton.
+///     </para>
+/// </remarks>
 public class ApprovalService : IApprovalService {
     private readonly IConfiguration _configuration;
     private readonly ITwitchHelixClient _helixClient;
@@ -20,6 +46,7 @@ public class ApprovalService : IApprovalService {
         _logger = logger;
     }
 
+    /// <inheritdoc />
     public bool IsApprovalRequired(ChatMessage requester) {
         var requireApproval = _configuration.GetValue("ClipSearch:RequireApproval", true);
 
@@ -41,6 +68,7 @@ public class ApprovalService : IApprovalService {
         return true;
     }
 
+    /// <inheritdoc />
     public async Task<bool> RequestApprovalAsync(
         ChatMessage requester,
         ClipData clip,
@@ -94,6 +122,7 @@ public class ApprovalService : IApprovalService {
         }
     }
 
+    /// <inheritdoc />
     public async Task<bool> ProcessApprovalResponseAsync(ChatMessage response) {
         var text = response.Message.TrimStart();
         var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);

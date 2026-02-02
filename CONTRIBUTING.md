@@ -1,6 +1,8 @@
 # Contributing to Cliparino
 
-Thank you for your interest in contributing to Cliparino! This document provides guidelines and instructions for contributing to the project.
+Thank you for your interest in contributing to Cliparino!
+
+> **⚠️ Note**: This document primarily describes the **legacy Streamer.bot-based version** (archived in [`/legacy/`](./legacy/)). The **modern rewrite** in [`/src/`](./src/) uses .NET 8.0, ASP.NET Core, and a different architecture. For modern codebase structure, see the [README](./README.md#repository-structure). This document will be updated as the modern version nears public release.
 
 ## Table of Contents
 
@@ -11,7 +13,7 @@ Thank you for your interest in contributing to Cliparino! This document provides
 - [Coding Standards](#coding-standards)
 - [Testing Guidelines](#testing-guidelines)
 - [Pull Request Process](#pull-request-process)
-- [FileProcessor Usage](#fileprocessor-usage)
+- [Legacy: FileProcessor Usage](#fileprocessor-usage)
 
 ## Code of Conduct
 
@@ -51,78 +53,71 @@ Pull requests are welcome! For major changes:
 
 ## Development Setup
 
-### Prerequisites
+### Modern Codebase (Current)
 
+**Prerequisites**: .NET 8.0 SDK, Windows 10+, OBS Studio 28+
+
+```bash
+# Clone and build
+git clone https://github.com/angrmgmt/Cliparino.git
+cd Cliparino
+dotnet build Cliparino.sln
+
+# Run tests
+dotnet test Cliparino.sln
+
+# Run application
+dotnet run --project src/Cliparino.Core
+```
+
+**IDE Options**: Visual Studio 2022+, JetBrains Rider, or VS Code with C# Dev Kit
+
+### Legacy Codebase (Archived)
+
+The legacy Streamer.bot version requires:
 - **.NET Framework 4.8.1** (or .NET SDK with Framework targeting)
-- **Visual Studio 2019+**, **JetBrains Rider**, or **VS Code**
-- **Git** for version control
-- **Streamer.bot** (v0.2.6+) for testing
-- **OBS Studio** for integration testing
+- **Streamer.bot** (v0.2.6+) installed at `%AppData%\Streamer.bot\`
+- **OBS Studio**
 
-### Setup Steps
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/angrmgmt/Cliparino.git
-   cd Cliparino
-   ```
-
-2. **Open the solution**
-   ```bash
-   # Visual Studio / Rider
-   start Cliparino.sln
-   
-   # Or use VS Code with C# extension
-   code .
-   ```
-
-3. **Restore dependencies**
-   Dependencies are referenced from the Streamer.bot installation directory. Ensure Streamer.bot is installed at `%AppData%\Streamer.bot\`.
-
-4. **Build the project**
-   ```bash
-   dotnet build Cliparino/Cliparino.csproj
-   ```
+Build legacy:
+```bash
+dotnet build legacy/Cliparino/Cliparino.csproj
+```
 
 ## Project Structure
 
-### Source Code Organization
+### Modern Codebase (`/src/`)
 
 ```
-Cliparino/src/
-├── CPHInline.cs              # Main entry point, command routing
+src/Cliparino.Core/
+├── Controllers/          # HTTP API controllers (Auth, Player, Health, etc.)
+├── Models/               # Data models (ClipData, ChatCommand, TwitchEvent, etc.)
+├── Services/             # Core services & background workers
+│   ├── PlaybackEngine.cs         # Playback state machine & queue processor
+│   ├── TwitchHelixClient.cs      # Twitch API client
+│   ├── ObsController.cs          # OBS automation & drift repair
+│   ├── TwitchEventCoordinator.cs # Event ingestion (EventSub + IRC fallback)
+│   └── ...
+├── UI/                   # System tray application
+├── wwwroot/              # Static web files (player page)
+├── Program.cs            # Application entry point
+└── appsettings.json      # Configuration template
+```
+
+**Architecture**: ASP.NET Core web host + WinForms tray UI, dependency injection, background services
+
+### Legacy Codebase (`/legacy/Cliparino/src/`)
+
+```
+legacy/Cliparino/src/
+├── CPHInline.cs              # Main entry point (Streamer.bot inline script)
 ├── Constants/
-│   └── CliparinoConstants.cs # All constants and user messages
-├── Managers/
-│   ├── ClipManager.cs        # Clip operations, caching, search
-│   ├── TwitchApiManager.cs   # Twitch API interactions
-│   ├── ObsSceneManager.cs    # OBS scene/source management
-│   ├── HttpManager.cs        # Embedded HTTP server
-│   └── CPHLogger.cs          # Logging utilities
-└── Utilities/
-    ├── ValidationHelper.cs    # Input validation methods
-    ├── InputProcessor.cs      # Input parsing logic
-    ├── ConfigurationManager.cs # Settings retrieval
-    ├── ErrorHandler.cs        # Error handling utilities
-    ├── RetryHelper.cs         # Retry logic with backoff
-    ├── ManagerFactory.cs      # Dependency creation
-    └── HttpResponseBuilder.cs # HTTP response builders
+│   └── CliparinoConstants.cs # Constants and user messages
+├── Managers/                 # Domain logic managers
+└── Utilities/                # Helper classes
 ```
 
-### Key Files
-
-- **CPHInline.cs**: Main entry point implementing Streamer.bot's `CPHInlineBase`. Contains command routing logic.
-- **Manager classes**: Encapsulate domain logic (clips, Twitch, OBS, HTTP)
-- **Utility classes**: Provide reusable functionality across the codebase
-- **Constants**: Centralized constants to eliminate magic numbers/strings
-
-### Understanding the Workflow
-
-1. User issues command in Twitch chat
-2. Streamer.bot invokes `CPHInline.Execute()`
-3. Command is routed to appropriate handler method
-4. Managers perform operations (fetch clip, configure OBS, serve content)
-5. Result is returned to Streamer.bot
+**Architecture**: Streamer.bot inline script (.NET Framework 4.7.2)
 
 ## Coding Standards
 
@@ -292,7 +287,9 @@ Use the appropriate template for your PR:
 3. Once approved, your PR will be merged
 4. Your contribution will be included in the next release!
 
-## FileProcessor Usage
+## Legacy: FileProcessor Usage
+
+> **Note**: FileProcessor is only needed for the legacy Streamer.bot version.
 
 The **FileProcessor** project prepares C# source code for Streamer.bot compatibility by:
 

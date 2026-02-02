@@ -7,6 +7,44 @@ using Cliparino.Core.Models;
 
 namespace Cliparino.Core.Services;
 
+/// <summary>
+///     Implements Twitch EventSub WebSocket connection for receiving real-time events.
+/// </summary>
+/// <remarks>
+///     <para>
+///         This class implements <see cref="ITwitchEventSource" /> using Twitch's EventSub WebSocket transport.
+///         EventSub is Twitch's modern event system that replaces PubSub and provides more reliable event delivery.
+///     </para>
+///     <para>
+///         <strong>EventSub WebSocket Flow:</strong><br />
+///         1. Connect to wss://eventsub.wss.twitch.tv/ws<br />
+///         2. Receive session_welcome with session_id<br />
+///         3. Subscribe to events (channel.chat.message, channel.raid) using session_id<br />
+///         4. Receive notification messages with event payloads<br />
+///         5. Handle keepalive messages to maintain connection<br />
+///         6. Handle reconnect messages to migrate to new session
+///     </para>
+///     <para>
+///         <strong>Message Types:</strong><br />
+///         - session_welcome: Initial connection handshake<br />
+///         - notification: Event payload (chat message, raid, etc.)<br />
+///         - session_keepalive: Heartbeat to maintain connection<br />
+///         - session_reconnect: Server requests migration to new endpoint
+///     </para>
+///     <para>
+///         Dependencies:
+///         - <see cref="ITwitchAuthStore" /> - OAuth token for subscription authentication
+///         - <see cref="IConfiguration" /> - Broadcaster user ID configuration
+///         - <see cref="ILogger{TCategoryName}" /> - Structured logging
+///     </para>
+///     <para>
+///         Thread-safety: Uses Channel for thread-safe event queuing. WebSocket messages are
+///         received on a background task and queued for consumption.
+///     </para>
+///     <para>
+///         Lifecycle: Registered as a singleton. Implements IAsyncDisposable for cleanup.
+///     </para>
+/// </remarks>
 public class TwitchEventSubWebSocketSource : ITwitchEventSource {
     private readonly ITwitchAuthStore _authStore;
     private readonly IConfiguration _configuration;
@@ -31,6 +69,7 @@ public class TwitchEventSubWebSocketSource : ITwitchEventSource {
     public bool IsConnected => _webSocket?.State == WebSocketState.Open;
     public string SourceName => "EventSub WebSocket";
 
+    /// <inheritdoc />
     public async Task ConnectAsync(CancellationToken cancellationToken = default) {
         if (IsConnected) {
             _logger.LogWarning("EventSub WebSocket already connected");
@@ -58,6 +97,7 @@ public class TwitchEventSubWebSocketSource : ITwitchEventSource {
         _ = Task.Run(() => ReceiveMessagesAsync(_connectionCts.Token), _connectionCts.Token);
     }
 
+    /// <inheritdoc />
     public async Task DisconnectAsync(CancellationToken cancellationToken = default) {
         if (_webSocket == null) return;
 
@@ -77,12 +117,14 @@ public class TwitchEventSubWebSocketSource : ITwitchEventSource {
         _logger.LogInformation("EventSub WebSocket disconnected");
     }
 
+    /// <inheritdoc />
     public async IAsyncEnumerable<TwitchEvent> StreamEventsAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default
     ) {
         await foreach (var evt in _eventChannel.Reader.ReadAllAsync(cancellationToken)) yield return evt;
     }
 
+    /// <inheritdoc />
     public async ValueTask DisposeAsync() {
         await DisconnectAsync();
         GC.SuppressFinalize(this);

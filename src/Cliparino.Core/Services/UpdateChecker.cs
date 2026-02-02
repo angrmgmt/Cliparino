@@ -3,12 +3,53 @@ using System.Text.Json;
 
 namespace Cliparino.Core.Services;
 
+/// <summary>
+///     Checks for application updates by querying the GitHub Releases API.
+/// </summary>
+/// <remarks>
+///     <para>
+///         This is the primary implementation of <see cref="IUpdateChecker" />, using the GitHub Releases API
+///         (with optional custom repository configuration) to check for newer versions.
+///     </para>
+///     <para>
+///         Key features:
+///         <list type="bullet">
+///             <item>Queries GitHub Releases API to retrieve the latest release</item>
+///             <item>Extracts current version from assembly metadata at runtime</item>
+///             <item>Compares versions using semantic versioning rules</item>
+///             <item>Logs check results and errors for debugging</item>
+///             <item>Configurable GitHub repository via configuration (defaults to "angrmgmt/Cliparino")</item>
+///         </list>
+///     </para>
+///     <para>
+///         Dependencies:
+///         <list type="bullet">
+///             <item><see cref="IHttpClientFactory" /> - For creating HTTP client instances (respects configured proxies)</item>
+///             <item><see cref="IConfiguration" /> - For reading custom GitHub repository configuration</item>
+///             <item><see cref="ILogger{UpdateChecker}" /> - For logging check results and errors</item>
+///         </list>
+///     </para>
+///     <para>Thread-safety: Thread-safe. HTTP requests are concurrent-safe and CurrentVersion is immutable.</para>
+///     <para>Lifecycle: Typically registered as Singleton.</para>
+/// </remarks>
 public class UpdateChecker : IUpdateChecker {
     private const string DefaultGitHubRepo = "angrmgmt/Cliparino";
     private readonly IConfiguration _configuration;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<UpdateChecker> _logger;
 
+    /// <summary>
+    ///     Initializes a new instance of the <see cref="UpdateChecker" /> class.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Extracts the current version from the executing assembly's version attribute.
+    ///         If version extraction fails, defaults to "0.0.0" to allow update checks to proceed.
+    ///     </para>
+    /// </remarks>
+    /// <param name="httpClientFactory">Factory for creating HTTP clients with configured proxy and headers.</param>
+    /// <param name="configuration">Configuration provider for reading update settings.</param>
+    /// <param name="logger">Logger instance for recording check results and errors.</param>
     public UpdateChecker(
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
@@ -23,8 +64,10 @@ public class UpdateChecker : IUpdateChecker {
         CurrentVersion = version?.ToString(3) ?? "0.0.0";
     }
 
+    /// <inheritdoc />
     public string CurrentVersion { get; }
 
+    /// <inheritdoc />
     public async Task<UpdateInfo?> CheckForUpdatesAsync(CancellationToken cancellationToken = default) {
         try {
             var githubRepo = _configuration["Update:GitHubRepo"] ?? DefaultGitHubRepo;
@@ -76,6 +119,18 @@ public class UpdateChecker : IUpdateChecker {
         }
     }
 
+    /// <summary>
+    ///     Compares two semantic version strings to determine if the latest is newer.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///         Uses .NET's built-in <see cref="Version" /> class for comparison.
+    ///         If either version cannot be parsed, logs a warning and returns false (no upgrade).
+    ///     </para>
+    /// </remarks>
+    /// <param name="latestVersion">The version string from the release channel (e.g., "2.0.1").</param>
+    /// <param name="currentVersion">The currently running version string (e.g., "2.0.0").</param>
+    /// <returns>True if latestVersion is greater than currentVersion; false otherwise.</returns>
     private bool IsVersionNewer(string latestVersion, string currentVersion) {
         try {
             var latest = Version.Parse(latestVersion);

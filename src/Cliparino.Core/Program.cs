@@ -2,6 +2,23 @@ using Cliparino.Core.Services;
 using Cliparino.Core.UI;
 using Serilog;
 
+/*
+Cliparino entry point (hybrid host)
+
+This application runs:
+- An ASP.NET Core web host that serves:
+  - The player page at http://localhost:5290/
+  - Controller-based HTTP APIs (see README for endpoints)
+- A WinForms system tray UI (TrayApplicationContext) on the UI thread
+
+Background services (registered via AddHostedService) run on the generic host and are responsible for:
+- Playback state machine and queue processing
+- Twitch event ingestion and failover behavior
+- OBS health supervision and drift repair
+- Periodic update checks and diagnostics
+*/
+
+
 Application.SetHighDpiMode(HighDpiMode.SystemAware);
 Application.EnableVisualStyles();
 Application.SetCompatibleTextRenderingDefault(false);

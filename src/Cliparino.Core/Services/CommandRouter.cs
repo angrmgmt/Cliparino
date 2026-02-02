@@ -3,7 +3,54 @@ using Cliparino.Core.Models;
 
 namespace Cliparino.Core.Services;
 
+/// <summary>
+///     Parses and executes chat commands from Twitch messages, orchestrating clip playback and shoutouts.
+/// </summary>
+/// <remarks>
+///     <para>
+///         This class implements <see cref="ICommandRouter" /> and serves as the central dispatcher for all
+///         chat-triggered actions in Cliparino. It receives chat messages from <see cref="TwitchEventCoordinator" />,
+///         parses them into strongly-typed command objects, and executes them by coordinating with multiple services.
+///     </para>
+///     <para>
+///         <strong>Command parsing strategy:</strong><br />
+///         - Uses regex for flexible clip URL matching (multiple Twitch URL formats)
+///         - Pattern matching for @username prefix detection in search commands
+///         - Case-insensitive command matching (!watch, !WATCH, !Watch all work)
+///         - Whitespace-tolerant parsing
+///     </para>
+///     <para>
+///         <strong>Command execution flow:</strong><br />
+///         1. <c>!watch &lt;url&gt;</c> → Fetch clip from Twitch API → Enqueue in playback engine<br />
+///         2. <c>!watch @user terms</c> → Search clips → Request moderator approval → Enqueue<br />
+///         3. <c>!stop</c> → Stop playback engine<br />
+///         4. <c>!replay</c> → Replay last clip<br />
+///         5. <c>!so @user</c> → Execute shoutout with random clip
+///     </para>
+///     <para>
+///         Dependencies:
+///         - <see cref="IPlaybackEngine" /> - Clip playback control
+///         - <see cref="ITwitchHelixClient" /> - Twitch API for clip fetching
+///         - <see cref="IShoutoutService" /> - Shoutout execution
+///         - <see cref="IClipSearchService" /> - Fuzzy clip search
+///         - <see cref="IApprovalService" /> - Moderator approval workflow
+///         - <see cref="IConfiguration" /> - Application settings (approval timeout, etc.)
+///         - <see cref="ILogger{TCategoryName}" /> - Structured logging
+///     </para>
+///     <para>
+///         Thread-safety: All methods are async and stateless (except for injected dependencies). Safe to
+///         call from multiple threads concurrently. The approval service maintains internal state for
+///         pending approval requests.
+///     </para>
+///     <para>
+///         Lifecycle: Registered as a singleton. A single instance exists for the lifetime of the application.
+///     </para>
+/// </remarks>
 public class CommandRouter : ICommandRouter {
+    /// <summary>
+    ///     Regex pattern for matching Twitch clip URLs and extracting the clip ID (slug).
+    ///     Supports both https://clips.twitch.tv/SlugHere and https://www.twitch.tv/broadcaster/clip/SlugHere formats.
+    /// </summary>
     private static readonly Regex ClipUrlRegex = new(
         @"(?:https?://)?(?:www\.)?(?:clips\.twitch\.tv/|twitch\.tv/\w+/clip/)([a-zA-Z0-9_-]+)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled
@@ -35,6 +82,7 @@ public class CommandRouter : ICommandRouter {
         _logger = logger;
     }
 
+    /// <inheritdoc />
     public ChatCommand? ParseCommand(ChatMessage message) {
         var text = message.Message.TrimStart();
 
@@ -57,6 +105,7 @@ public class CommandRouter : ICommandRouter {
         };
     }
 
+    /// <inheritdoc />
     public async Task ExecuteCommandAsync(ChatCommand command, CancellationToken cancellationToken = default) {
         try {
             switch (command) {
@@ -95,6 +144,7 @@ public class CommandRouter : ICommandRouter {
         }
     }
 
+    /// <inheritdoc />
     public async Task ProcessChatMessageAsync(ChatMessage message, CancellationToken cancellationToken = default) {
         await _approvalService.ProcessApprovalResponseAsync(message);
 

@@ -3,6 +3,18 @@ using System.Text.Json;
 
 namespace Cliparino.Core.UI;
 
+/// <summary>
+///     Provides a Windows Forms UI for viewing and editing Cliparino configuration.
+/// </summary>
+/// <remarks>
+///     <para>
+///         The form reads configuration values from <see cref="IConfiguration" /> and persists changes to an
+///         <c>appsettings.json</c> file located next to the executable (see the Save action in the UI).
+///     </para>
+///     <para>
+///         Threading: this form must be created and interacted with on the WinForms UI thread.
+///     </para>
+/// </remarks>
 public class SettingsForm : Form {
     private readonly IConfiguration _configuration;
 
@@ -23,6 +35,11 @@ public class SettingsForm : Form {
     private CheckBox _useFeaturedClipsCheckBox = null!;
     private NumericUpDown _widthNumeric = null!;
 
+    /// <summary>
+    ///     Initializes a new instance of the <see cref="SettingsForm" /> class.
+    /// </summary>
+    /// <param name="services">Root service provider used to resolve <see cref="IConfiguration" />.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="services" /> is <see langword="null" />.</exception>
     public SettingsForm(IServiceProvider services) {
         _ = services;
         _configuration = services.GetRequiredService<IConfiguration>();

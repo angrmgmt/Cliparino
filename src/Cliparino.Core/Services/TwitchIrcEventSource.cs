@@ -7,6 +7,21 @@ using Cliparino.Core.Models;
 
 namespace Cliparino.Core.Services;
 
+/// <summary>
+///     Provides an IRC-based event source for Twitch chat messages and notifications.
+/// </summary>
+/// <remarks>
+///     <para>Used as a fallback mechanism when the primary EventSub WebSocket connection is unavailable or fails.</para>
+///     <para>
+///         Dependencies: <see cref="ITwitchAuthStore" /> for access tokens and
+///         <see cref="ILogger{TwitchIrcEventSource}" /> for logging.
+///     </para>
+///     <para>
+///         Thread-safety: Internal state is managed via <see cref="CancellationTokenSource" /> and a
+///         <see cref="Channel{TwitchEvent}" /> to ensure safe event streaming.
+///     </para>
+///     <para>Lifecycle: Managed by <see cref="TwitchEventCoordinator" /> as an <see cref="ITwitchEventSource" />.</para>
+/// </remarks>
 public partial class TwitchIrcEventSource(
     ITwitchAuthStore authStore,
     ILogger<TwitchIrcEventSource> logger)
@@ -21,9 +36,22 @@ public partial class TwitchIrcEventSource(
     private string? _username;
     private StreamWriter? _writer;
 
+    /// <summary>
+    ///     Gets a value indicating whether the IRC client is currently connected.
+    /// </summary>
     public bool IsConnected => _tcpClient?.Connected ?? false;
+
+    /// <summary>
+    ///     Gets the name of the event source.
+    /// </summary>
     public string SourceName => "IRC";
 
+    /// <summary>
+    ///     Establishes a connection to the Twitch IRC server and joins the broadcaster's channel.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token to cancel the operation.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when no access token is available.</exception>
     public async Task ConnectAsync(CancellationToken cancellationToken = default) {
         if (IsConnected) {
             logger.LogWarning("IRC already connected");
@@ -58,6 +86,11 @@ public partial class TwitchIrcEventSource(
         logger.LogInformation("IRC connected to #{Channel}", _username);
     }
 
+    /// <summary>
+    ///     Disconnects from the Twitch IRC server and cleans up resources.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token to cancel the operation.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     public async Task DisconnectAsync(CancellationToken cancellationToken = default) {
         if (_connectionCts != null) {
             await _connectionCts.CancelAsync();
@@ -85,12 +118,14 @@ public partial class TwitchIrcEventSource(
         logger.LogInformation("IRC disconnected");
     }
 
+    /// <inheritdoc />
     public async IAsyncEnumerable<TwitchEvent> StreamEventsAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default
     ) {
         await foreach (var evt in _eventChannel.Reader.ReadAllAsync(cancellationToken)) yield return evt;
     }
 
+    /// <inheritdoc />
     public async ValueTask DisposeAsync() {
         await DisconnectAsync();
         GC.SuppressFinalize(this);

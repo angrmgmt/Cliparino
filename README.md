@@ -8,9 +8,9 @@
 
 ## Overview
 
-Cliparino is a modern, standalone Windows tray application for playing Twitch clips during streams. Built with a "just works" philosophy, it provides intelligent clip search, automatic OBS integration, self-healing reliability, and comprehensive queue management.
+Cliparino is a standalone Windows tray application for playing Twitch clips during streams. Built with a "just works" philosophy, it provides intelligent clip search, automatic OBS integration, self-healing reliability, and comprehensive queue management.
 
-> **Note**: This README describes the **modern rewrite** (currently in active development). The legacy Streamer.bot-based version is archived in [`/legacy/`](./legacy/) for reference. See [Development Status](#development-status) below for current progress.
+> **Note**: This describes the **modern rewrite** (.NET 8). The legacy Streamer.bot version is archived in [`/legacy/`](./legacy/). See [Development Status](#development-status) for progress.
 
 ## Key Features
 
@@ -24,23 +24,23 @@ Cliparino is a modern, standalone Windows tray application for playing Twitch cl
 
 ### Shoutout System
 - **Automatic Shoutouts**: Trigger on raids or manual `!so` command
-- **Smart Clip Selection**: Prioritize featured clips with configurable fallback ranges
-- **Customizable Messages**: Configurable chat messages with channel links
-- **Native Integration**: Uses Twitch's built-in `/shoutout` command
-- **Separate Queue**: Shoutouts don't interfere with regular clip queue
+- **Smart Clip Selection**: Prioritize featured clips with fallback to recent/short clips
+- **Customizable Messages**: Template-based chat messages with placeholders
+- **Native Integration**: Uses Twitch `/shoutout` command
+- **Separate Queue**: Independent from regular clip playback
 
 ### OBS Integration
-- **Automatic Scene Management**: Creates and manages scenes and sources automatically
-- **Flexible Display**: Configurable dimensions with automatic 16:9 aspect ratio handling
-- **Browser Source**: Clips served via embedded HTTP server for reliable playback
-- **Multi-Scene Support**: Copy sources to any scene as needed
+- **Automatic Scene Management**: Creates/manages scenes and sources automatically
+- **Flexible Display**: Configurable dimensions (auto 16:9 aspect ratio)
+- **Browser Source**: Clips served via local HTTP server
+- **Drift Repair**: Auto-corrects configuration mismatches
 
 ### Technical Features
-- **Intelligent Caching**: Reduces API calls and improves search performance
-- **Retry Logic**: Automatic retry with exponential backoff for failed operations
-- **Comprehensive Logging**: Detailed debug logging for troubleshooting
-- **Error Recovery**: Graceful error handling with user-friendly messages
-- **Modular Architecture**: Clean separation of concerns with dedicated managers
+- **Intelligent Caching**: Reduces API calls, improves search performance
+- **Retry Logic**: Exponential backoff for failed operations
+- **Comprehensive Logging**: Debug logging for troubleshooting
+- **Self-Healing**: Automatic reconnection, drift repair, bad clip quarantine
+- **Modular Architecture**: Clean separation of concerns with dependency injection
 
 ## Requirements
 
@@ -153,110 +153,188 @@ Stop the currently playing clip.
 
 ### Configuration
 
-All settings are accessible in Streamer.bot under the **Cliparino** action → **Sub-Actions**:
+Cliparino is configured via `appsettings.json` (located next to the executable). Access settings through the tray menu. **Restart required** after changing settings.
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| **Display Width** | 1920 | Width of clip player (pixels) |
-| **Display Height** | 1080 | Height of clip player (pixels) |
-| **Enable Logging** | False | Log all operations to Streamer.bot log folder |
-| **Shoutout Message** | Custom template | Message sent to chat during shoutouts (supports variables) |
-| **Featured Clips Only** | False | Limit shoutouts to featured clips only |
-| **Max Clip Length** | 30 | Maximum clip duration for shoutouts (seconds) |
-| **Clip Max Age** | 30 | Maximum clip age for shoutouts (days) |
+### Common Settings
 
-**Display Notes:**
-- Player automatically maintains 16:9 aspect ratio
-- Non-standard dimensions add black bars as needed
-- Adjust to match your stream canvas resolution
+| Key | Default | Description |
+|-----|---------|-------------|
+| `Obs:Host` | `localhost` | OBS WebSocket host |
+| `Obs:Port` | `4455` | OBS WebSocket port |
+| `Obs:Password` | *(empty)* | OBS WebSocket password |
+| `Player:SceneName` | `Cliparino` | OBS scene name used/managed by Cliparino |
+| `Player:SourceName` | `Cliparino Player` | OBS browser source name used/managed by Cliparino |
+| `Player:Width` | `1920` | Player viewport width (pixels) |
+| `Player:Height` | `1080` | Player viewport height (pixels) |
+| `Shoutout:EnableMessage` | `true` | Whether Cliparino sends a shoutout chat message |
+| `Shoutout:MessageTemplate` | `Check out {broadcaster}! ...` | Shoutout message template (supports placeholders) |
+| `Shoutout:UseFeaturedClips` | `true` | Prefer featured clips for shoutouts when available |
+| `Shoutout:MaxClipLength` | `60` | Max clip duration used for shoutout selection (seconds) |
+| `Shoutout:MaxClipAge` | `30` | Max clip age used for shoutout selection (days) |
+| `Logging:LogLevel:Default` | `Information` | Application log level |
 
-**Shoutout Message Variables:**
-- Use placeholders for dynamic content (configured in Streamer.bot)
+### Example `appsettings.json`
 
-### Automatic Shoutouts
+```json
+{
+  "Obs": {
+    "Host": "localhost",
+    "Port": "4455",
+    "Password": ""
+  },
+  "Player": {
+    "SceneName": "Cliparino",
+    "SourceName": "Cliparino Player",
+    "Width": "1920",
+    "Height": "1080"
+  },
+  "Shoutout": {
+    "EnableMessage": "true",
+    "MessageTemplate": "Check out {broadcaster}! They were last playing {game}! twitch.tv/{broadcaster}",
+    "UseFeaturedClips": "true",
+    "MaxClipLength": "60",
+    "MaxClipAge": "30"
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information"
+    }
+  }
+}
+```
 
-The included "Automatic Shoutouts" action triggers `!so` on raid events.
+## HTTP API
 
-**To Enable:**
-1. Ensure the action is enabled in Streamer.bot
-2. Verify the raid trigger is active
+The local web host listens on `http://localhost:5290`.
 
-**To Disable:**
-1. Disable the "Automatic Shoutouts" action
-2. Manual `!so` commands still work
+### Player endpoints (`/api`)
 
-### Queue Behavior
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/status` | Current player state, current clip (if any), and queue size |
+| POST | `/api/play` | Enqueue a clip for playback (body: `PlayClipRequest`) |
+| POST | `/api/replay` | Replay the most recently played clip |
+| POST | `/api/stop` | Stop playback |
+| POST | `/api/content-warning` | Record a content-warning signal (currently informational) |
 
-- **Watch Queue**: Clips from `!watch` and `!replay` play sequentially
-- **Shoutout Queue**: Clips from `!so` and raid events play independently
-- Queues operate in first-in, first-out (FIFO) order
-- `!stop` skips current clip and plays next in queue
+**POST `/api/play` body**
+
+```json
+{
+  "clipId": "https://clips.twitch.tv/...",
+  "title": "Optional",
+  "creatorName": "Optional",
+  "broadcasterName": "Optional",
+  "gameName": "Optional",
+  "durationSeconds": 30
+}
+```
+
+### Health endpoint
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/health` | Aggregated health for core components and integrations |
+
+### Diagnostics endpoints (`/api/diagnostics/export`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/diagnostics/export` | Export a plain-text diagnostics report |
+| GET | `/api/diagnostics/export/zip` | Export diagnostics as a ZIP archive |
+
+### Update endpoints (`/api/update`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/update/check` | Check for updates and return the latest release metadata |
+| GET | `/api/update/current` | Return the current running version |
+
+### Auth endpoints (`/auth`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/auth/login` | Return the OAuth authorization URL |
+| GET | `/auth/callback` | OAuth callback used by Twitch redirect (returns HTML) |
+| GET | `/auth/status` | Whether Cliparino is authenticated |
+| POST | `/auth/logout` | Clear stored authentication state |
+
 
 ## Architecture
+
+### Component Interaction Flow
+
+#### Clip playback flow
+```
+Chat / API
+   → TwitchEventCoordinator
+       → CommandRouter
+           → PlaybackEngine
+               → ObsController (scene/source management)
+                   → Player page (browser source)
+```
+
+#### Self-healing flow
+```
+ObsHealthSupervisor detects issue
+   → reconnect / backoff
+   → drift detection
+   → desired-state repair (scene/source re-creation / configuration)
+```
+
+#### Failover flow
+```
+EventSub WebSocket degraded
+   → TwitchEventCoordinator switches to IRC
+   → continue emitting TwitchEvent stream to CommandRouter
+```
+
 
 ### Repository Structure
 
 ```
-/Cliparino/
+Cliparino/
 ├── src/                           # Modern rewrite (canonical)
 │   ├── Cliparino.Core/           # Main application (.NET 8)
-│   │   ├── Commands/             # Command handlers
-│   │   ├── Managers/             # Core managers (Clip, Twitch, OBS, HTTP)
+│   │   ├── Controllers/          # HTTP API controllers
 │   │   ├── Models/               # Data models
-│   │   ├── Services/             # Background services & health checks
-│   │   └── UI/                   # Tray application UI
-│   └── tests/                    # Test projects
+│   │   ├── Services/             # Core services & background workers
+│   │   ├── UI/                   # System tray application UI
+│   │   ├── wwwroot/              # Static web files (player page)
+│   │   ├── Program.cs            # Application entry point
+│   │   └── appsettings.json      # Configuration template
+│   └── tests/
 │       └── Cliparino.Core.Tests/ # Unit tests
-├── docs/                          # Planning and tracking documents
-│   ├── PLAN.MD                   # Development roadmap & milestones
+├── docs/                          # Development documentation
+│   ├── PLAN.MD                   # Development roadmap
 │   ├── PARITY_CHECKLIST.md       # Feature parity tracking
-│   └── MILESTONE_*.md            # Milestone completion docs
+│   └── MILESTONE_*.md            # Milestone completion reports
 ├── legacy/                        # Legacy Streamer.bot code (archived)
-│   ├── Cliparino/                # Old inline script project
-│   ├── FileProcessor/            # Build utilities
-│   └── *.ps1, *.cs               # Test scripts
-├── Cliparino.sln                 # Root solution file
+│   ├── Cliparino/                # Original inline script project (.NET Framework 4.7.2)
+│   └── FileProcessor/            # Build utilities for legacy version
+├── Cliparino.sln                 # Solution file
 └── README.md                     # This file
 ```
 
 ### Core Components
 
-The modern rewrite is organized into these key components:
+#### **Tray Host** ([`TrayApplicationContext.cs`](./src/Cliparino.Core/UI/TrayApplicationContext.cs))
+Windows system tray application providing lifecycle management, status display, and diagnostics export.
 
-#### **Tray Host**
-- Windows system tray application
-- Lifecycle management
-- Status display and diagnostics export
+#### **Local Player Server** ([`Program.cs`](./src/Cliparino.Core/Program.cs))
+ASP.NET Core web host serving the clip player page at `http://localhost:5290/` for OBS Browser Source, plus HTTP APIs for control and monitoring.
 
-#### **Local Player Server**
-- HTTP server hosting clip player page
-- Serves `http://127.0.0.1:<port>/` for OBS Browser Source
-- Health endpoint for monitoring
+#### **Clip Engine** ([`PlaybackEngine.cs`](./src/Cliparino.Core/Services/PlaybackEngine.cs), [`ClipQueue.cs`](./src/Cliparino.Core/Services/ClipQueue.cs))
+Command routing, clip resolution, queue management (FIFO playback), and playback state machine.
 
-#### **Clip Engine**
-- Command parsing and routing
-- Clip resolution and metadata
-- Queue management (FIFO playback)
-- Playback state machine
+#### **Twitch Integration** ([`TwitchHelixClient.cs`](./src/Cliparino.Core/Services/TwitchHelixClient.cs), [`TwitchEventCoordinator.cs`](./src/Cliparino.Core/Services/TwitchEventCoordinator.cs))
+OAuth 2.0 authentication with token refresh, Helix API client, EventSub WebSocket (primary), IRC fallback, and chat message sending.
 
-#### **Twitch Integration**
-- OAuth 2.0 authentication with token refresh
-- Twitch Helix API client (clips, user data)
-- EventSub WebSocket (primary event intake)
-- IRC fallback (resilient command intake)
-- Chat message sending
+#### **OBS Integration** ([`ObsController.cs`](./src/Cliparino.Core/Services/ObsController.cs), [`ObsHealthSupervisor.cs`](./src/Cliparino.Core/Services/ObsHealthSupervisor.cs))
+obs-websocket client, desired-state enforcement (auto-create/repair scenes & sources), browser source management, and drift detection/correction.
 
-#### **OBS Integration**
-- obs-websocket client (OBS 28+ built-in server)
-- Desired-state enforcement (auto-create/repair scenes & sources)
-- Browser source management and refresh
-- Drift detection and correction
-
-#### **Health & Self-Repair Supervisor**
-- Periodic health checks for all components
-- Automatic reconnection with exponential backoff
-- Drift correction for OBS configuration
-- Bad clip quarantine to prevent queue stalls
+#### **Health & Self-Repair** ([`HealthReporter.cs`](./src/Cliparino.Core/Services/HealthReporter.cs), [`ObsHealthSupervisor.cs`](./src/Cliparino.Core/Services/ObsHealthSupervisor.cs))
+Periodic health checks, automatic reconnection with exponential backoff, drift correction, and bad clip quarantine.
 
 ### Design Principles
 
@@ -269,37 +347,9 @@ The modern rewrite is organized into these key components:
 
 ## Troubleshooting
 
-> **Note**: Since the modern rewrite is still in development, this section will be expanded as the application is tested with end users.
-
-### For Developers
-
-#### Build Issues
-- Ensure .NET 8.0 SDK is installed
-- Run `dotnet restore` before building
-- Check that all project references are correct
-
-#### Test Failures
-- Verify all dependencies are installed
-- Check test logs for specific error messages
-- Ensure external services (Twitch API, OBS) are properly mocked in tests
-
-#### Runtime Issues
-- Check application logs in the output directory
-- Verify Twitch OAuth tokens are valid
-- Ensure OBS WebSocket server is running and accessible
-- Confirm firewall isn't blocking localhost HTTP server
-
-### Getting Help
-
-1. **Check Issues**: Search [existing issues](https://github.com/angrmgmt/Cliparino/issues) for solutions
-2. **Check Documentation**: Review [`/docs/PLAN.MD`](./docs/PLAN.MD) and milestone completion docs
-3. **Enable Debug Logging**: Set logging to verbose for detailed output
-4. **Create Issue**: Submit a [new issue](https://github.com/angrmgmt/Cliparino/issues/new) with:
-   - .NET version
-   - OBS version
-   - Steps to reproduce
-   - Log excerpts (with tokens redacted)
-   - Expected vs. actual behavior
+- **Search Issues**: Check [existing issues](https://github.com/angrmgmt/Cliparino/issues)
+- **Debug Logging**: Set `Logging:LogLevel:Default` to `Debug` in `appsettings.json`
+- **Report Bug**: [Create an issue](https://github.com/angrmgmt/Cliparino/issues/new) with .NET version, OBS version, steps to reproduce, and log excerpts (redact tokens)
 
 ## Development Status
 
@@ -322,60 +372,40 @@ The modern rewrite is progressing through phased milestones. See [`/docs/PLAN.MD
 
 ## Development
 
-### Quick Start for Developers
+### Quick Start
 
-1. **Clone Repository**
-   ```bash
-   git clone https://github.com/angrmgmt/Cliparino.git
-   cd Cliparino
-   ```
+```bash
+# Clone repository
+git clone https://github.com/angrmgmt/Cliparino.git
+cd Cliparino
 
-2. **Open Solution**
-   ```bash
-   # Open in Visual Studio, Rider, or VS Code
-   Cliparino.sln
-   ```
+# Build project
+dotnet build Cliparino.sln
 
-3. **Build Project**
-   ```bash
-   dotnet build Cliparino.sln
-   ```
+# Run tests
+dotnet test Cliparino.sln
 
-4. **Run Tests**
-   ```bash
-   dotnet test Cliparino.sln
-   ```
+# Run application
+dotnet run --project src/Cliparino.Core
+```
 
-5. **Run Application**
-   ```bash
-   dotnet run --project src/Cliparino.Core
-   ```
+**Prerequisites**: .NET 8.0 SDK, Windows 10+, OBS Studio 28+
 
-### Code Style
+**IDE Options**: Visual Studio 2022+, JetBrains Rider, or VS Code with C# Dev Kit
 
-- **Language**: C# (latest)
-- **Framework**: .NET 8.0 LTS
-- **Brace Style**: One True Brace Style (OTB)
-- **Documentation**: XML comments for public APIs
-- **Naming**: PascalCase for public members, camelCase with `_` prefix for private fields
-- **Async**: Prefer async/await for I/O operations
+### Code Conventions
 
-### Legacy Code
+- **Language**: C# (latest features)
+- **Framework**: .NET 8.0 LTS (`net8.0-windows`)
+- **Style**: One True Brace Style (OTB), PascalCase for public APIs, `_camelCase` for private fields
+- **Async**: Use async/await for all I/O operations
+- **Docs**: XML comments for public APIs
 
-The legacy Streamer.bot implementation is archived in [`/legacy/`](./legacy/) for reference only. Development focuses exclusively on the modern rewrite in [`/src/`](./src/).
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed guidelines on code style, testing, and pull requests.
 
 ## Contributing
 
-Contributions are welcome! Please review [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed guidelines.
-
-For major changes, please open an issue first to discuss your proposal.
-
-### Pull Request Templates
-
-- [**Bugfix Request**](https://github.com/angrmgmt/Cliparino/compare?title=Bugfix%20Request&body=%23%23%20Bugfix%20Pull%20Request%0A%0A%23%23%23%20Description%0APlease%20provide%20a%20clear%20and%20concise%20description%20of%20the%20bug%20and%20the%20fix.%0A%0A%23%23%23%20Related%20Issue%0AIf%20applicable%2C%20please%20provide%20a%20link%20to%20the%20related%20issue.%0A%0A%23%23%23%20How%20Has%20This%20Been%20Tested%3F%0APlease%20describe%20the%20tests%20that%20you%20ran%20to%20verify%20your%20changes.%20Provide%20instructions%20so%20we%20can%20reproduce.%0A%0A-%20%5B%20%5D%20Test%20A%0A-%20%5B%20%5D%20Test%20B%0A%0A%23%23%23%20Screenshots%20(if%20appropriate)%3A%0AIf%20applicable%2C%20add%20screenshots%20to%20help%20explain%20your%20problem%20and%20solution.%0A%0A%23%23%23%20Checklist%3A%0A-%20%5B%20%5D%20My%20code%20follows%20the%20style%20guidelines%20of%20this%20project%0A-%20%5B%20%5D%20I%20have%20performed%20a%20self-review%20of%20my%20own%20code%0A-%20%5B%20%5D%20I%20have%20commented%20my%20code%2C%20particularly%20in%20hard-to-understand%20areas%0A-%20%5B%20%5D%20I%20have%20made%20corresponding%20changes%20to%20the%20documentation%0A-%20%5B%20%5D%20My%20changes%20generate%20no%20new%20warnings%0A-%20%5B%20%5D%20I%20have%20added%20tests%20that%20prove%20my%20fix%20is%20effective%20or%20that%20my%20feature%20works%0A-%20%5B%20%5D%20New%20and%20existing%20unit%20tests%20pass%20locally%20with%20my%20changes%0A-%20%5B%20%5D%20Any%20dependent%20changes%20have%20been%20merged%20and%20published%20in%20downstream%20modules)
-- [**Feature Request**](https://github.com/angrmgmt/Cliparino/compare?title=New%20Feature%20Request&body=%23%23%20Feature%3A%20%5BFeature%20Name%5D%0A%0A%23%23%23%20Description%0AProvide%20a%20detailed%20description%20of%20the%20feature%20being%20implemented.%20Include%20the%20purpose%20and%20functionality%20of%20the%20feature.%0A%0A%23%23%23%20Related%20Issue%0AIf%20applicable%2C%20mention%20any%20related%20issues%20or%20link%20to%20the%20issue%20number.%0A%0A%23%23%23%20Implementation%20Details%0ADescribe%20how%20the%20feature%20was%20implemented.%20Include%20information%20about%20any%20new%20files%2C%20functions%2C%20or%20changes%20to%20existing%20code.%0A%0A%23%23%23%20Testing%0AExplain%20how%20the%20feature%20was%20tested.%20Include%20details%20about%20any%20unit%20tests%2C%20integration%20tests%2C%20or%20manual%20testing%20performed.%0A%0A%23%23%23%20Checklist%0A-%20%5B%20%5D%20I%20have%20performed%20a%20self-review%20of%20my%20own%20code%0A-%20%5B%20%5D%20I%20have%20commented%20my%20code%2C%20particularly%20in%20hard-to-understand%20areas%0A-%20%5B%20%5D%20I%20have%20made%20corresponding%20changes%20to%20the%20documentation%0A-%20%5B%20%5D%20I%20have%20added%20tests%20that%20prove%20my%20fix%20is%20effective%20or%20that%20my%20feature%20works%0A-%20%5B%20%5D%20New%20and%20existing%20unit%20tests%20pass%20locally%20with%20my%20changes%0A-%20%5B%20%5D%20Any%20dependent%20changes%20have%20been%20merged%20and%20published%20in%20downstream%20modules%0A%0A%23%23%23%20Screenshots%20(if%20applicable)%0AIf%20applicable%2C%20add%20screenshots%20to%20help%20explain%20your%20feature.)
-
-For major changes, please open an issue first to discuss your proposal.
+Contributions are welcome! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines on code style, testing, and pull requests. For major changes, please open an issue first to discuss your proposal.
 
 ## License
 
@@ -385,7 +415,7 @@ Copyright (C) 2024 Scott Mongrain - angrmgmt@gmail.com
 
 ## Acknowledgments
 
-- [**Streamer.bot**](https://streamer.bot/) - The automation platform that makes this possible
+- [**Streamer.bot**](https://streamer.bot/) - The original Cliparino was built on Streamer.bot. The modern rewrite is standalone, but this platform inspired the project.
 - [**OBS Studio**](https://obsproject.com/) - For the streaming infrastructure
 - [**Twitch**](https://www.twitch.tv/) - For the API and platform
 

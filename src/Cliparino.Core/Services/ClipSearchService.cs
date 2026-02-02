@@ -2,6 +2,25 @@ using Cliparino.Core.Models;
 
 namespace Cliparino.Core.Services;
 
+/// <summary>
+///     Searches Twitch clips using word-based fuzzy matching to find clips by title.
+/// </summary>
+/// <remarks>
+///     <para>
+///         This class implements <see cref="IClipSearchService" /> using a word-tokenization similarity
+///         algorithm. The search algorithm splits both search terms and clip titles into words, then
+///         calculates similarity scores based on word matches, handling typos and word order variations.
+///     </para>
+///     <para>
+///         Dependencies:
+///         - <see cref="ITwitchHelixClient" /> - Fetch clips from Twitch
+///         - <see cref="IConfiguration" /> - Search configuration settings
+///         - <see cref="ILogger{TCategoryName}" /> - Structured logging
+///     </para>
+///     <para>
+///         Lifecycle: Registered as a singleton.
+///     </para>
+/// </remarks>
 public class ClipSearchService : IClipSearchService {
     private readonly IConfiguration _configuration;
     private readonly ITwitchHelixClient _helixClient;
@@ -17,6 +36,7 @@ public class ClipSearchService : IClipSearchService {
         _logger = logger;
     }
 
+    /// <inheritdoc />
     public async Task<ClipData?> SearchClipAsync(
         string broadcasterName, string searchTerms, CancellationToken cancellationToken = default
     ) {
@@ -34,6 +54,7 @@ public class ClipSearchService : IClipSearchService {
         return matchingClips.First();
     }
 
+    /// <inheritdoc />
     public async Task<IReadOnlyList<ClipData>> GetMatchingClipsAsync(
         string broadcasterName,
         string searchTerms,

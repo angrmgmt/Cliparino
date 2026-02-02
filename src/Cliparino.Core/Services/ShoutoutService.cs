@@ -2,6 +2,30 @@ using Cliparino.Core.Models;
 
 namespace Cliparino.Core.Services;
 
+/// <summary>
+///     Executes Twitch shoutouts with random clip playback and configurable filters.
+/// </summary>
+/// <remarks>
+///     <para>
+///         This class implements <see cref="IShoutoutService" /> by selecting random clips from a target
+///         broadcaster's channel with optional filtering (featured only, max duration, max age) and sending
+///         Twitch's native <c>/shoutout</c> command.
+///     </para>
+///     <para>
+///         Clip selection algorithm prioritizes featured clips when UseFeaturedClipsFirst is enabled,
+///         then falls back to all clips if no featured clips match the filters.
+///     </para>
+///     <para>
+///         Dependencies:
+///         - <see cref="ITwitchHelixClient" /> - Fetch clips and send shoutouts
+///         - <see cref="IPlaybackEngine" /> - Enqueue selected clip for playback
+///         - <see cref="IConfiguration" /> - Shoutout settings (filters, fallbacks)
+///         - <see cref="ILogger{TCategoryName}" /> - Structured logging
+///     </para>
+///     <para>
+///         Lifecycle: Registered as a singleton.
+///     </para>
+/// </remarks>
 public class ShoutoutService : IShoutoutService {
     private readonly IConfiguration _configuration;
     private readonly ITwitchHelixClient _helixClient;
@@ -20,6 +44,7 @@ public class ShoutoutService : IShoutoutService {
         _logger = logger;
     }
 
+    /// <inheritdoc />
     public async Task<ClipData?> SelectRandomClipAsync(
         string broadcasterName, CancellationToken cancellationToken = default
     ) {
@@ -86,6 +111,7 @@ public class ShoutoutService : IShoutoutService {
         return null;
     }
 
+    /// <inheritdoc />
     public async Task<bool> ExecuteShoutoutAsync(
         string sourceBroadcasterId, string targetUsername, CancellationToken cancellationToken = default
     ) {

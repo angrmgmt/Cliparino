@@ -1,16 +1,37 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Cliparino.Core.Services;
 
 namespace Cliparino.Core.UI;
 
+/// <summary>
+///     WinForms <see cref="ApplicationContext" /> that hosts the system tray icon and its menu interactions.
+/// </summary>
+/// <remarks>
+///     <para>
+///         Cliparino runs as a hybrid application: an ASP.NET Core web host (player page + API) plus a Windows tray UI.
+///         This context owns the tray icon lifetime and launches UI actions (settings, logs, diagnostics, update checks).
+///     </para>
+///     <para>
+///         Threading: all menu callbacks run on the WinForms UI thread. Any long-running work must be awaited
+///         asynchronously
+///         to keep the UI responsive.
+///     </para>
+/// </remarks>
 public class TrayApplicationContext : ApplicationContext {
     private readonly IServiceProvider _services;
     private readonly NotifyIcon _trayIcon;
     private bool _isCheckingForUpdates;
     private SettingsForm? _settingsForm;
 
+    /// <summary>
+    ///     Initializes a new instance of the <see cref="TrayApplicationContext" /> class.
+    /// </summary>
+    /// <param name="services">
+    ///     Root service provider used to resolve application services for UI-triggered operations.
+    /// </param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="services" /> is <see langword="null" />.</exception>
     public TrayApplicationContext(IServiceProvider services) {
-        _services = services;
+        _services = services ?? throw new ArgumentNullException(nameof(services));
         _trayIcon = new NotifyIcon {
             Icon = SystemIcons.Application,
             Text = "Cliparino - Twitch Clip Player",
@@ -194,6 +215,12 @@ public class TrayApplicationContext : ApplicationContext {
         Application.Exit();
     }
 
+    /// <summary>
+    ///     Disposes the tray icon and any UI resources created by this application context.
+    /// </summary>
+    /// <param name="disposing">
+    ///     <see langword="true" /> to dispose managed resources; otherwise <see langword="false" />.
+    /// </param>
     protected override void Dispose(bool disposing) {
         if (disposing) {
             _trayIcon.Dispose();

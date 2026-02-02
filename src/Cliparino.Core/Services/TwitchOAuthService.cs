@@ -6,6 +6,38 @@ using System.Text.Json.Serialization;
 
 namespace Cliparino.Core.Services;
 
+/// <summary>
+///     Implements Twitch OAuth 2.0 authentication with PKCE (Proof Key for Code Exchange) for enhanced security.
+/// </summary>
+/// <remarks>
+///     <para>
+///         This class implements <see cref="ITwitchOAuthService" /> using the OAuth 2.0 authorization code flow
+///         with PKCE extension. PKCE protects against authorization code interception attacks by requiring
+///         a code verifier that must match the initial code challenge.
+///     </para>
+///     <para>
+///         <strong>PKCE Flow:</strong><br />
+///         1. Generate random code_verifier (43-128 characters)<br />
+///         2. Create code_challenge = BASE64URL(SHA256(code_verifier))<br />
+///         3. Send code_challenge in authorization URL<br />
+///         4. User authorizes, receives auth code<br />
+///         5. Exchange auth code + code_verifier for tokens<br />
+///         6. Twitch validates: SHA256(code_verifier) == stored code_challenge
+///     </para>
+///     <para>
+///         Dependencies:
+///         - <see cref="ITwitchAuthStore" /> - Token persistence
+///         - <see cref="ILogger{TCategoryName}" /> - Structured logging
+///         - <see cref="IHttpClientFactory" /> - HTTP client for Twitch API calls
+///         - <see cref="IConfiguration" /> - Client ID and redirect URI configuration
+///     </para>
+///     <para>
+///         Thread-safety: Token refresh is synchronized with SemaphoreSlim to prevent concurrent refreshes.
+///     </para>
+///     <para>
+///         Lifecycle: Registered as a singleton.
+///     </para>
+/// </remarks>
 public class TwitchOAuthService(
     ITwitchAuthStore authStore,
     ILogger<TwitchOAuthService> logger,
@@ -20,10 +52,12 @@ public class TwitchOAuthService(
     private string? _codeVerifier;
     private string? _state;
 
+    /// <inheritdoc />
     public Task<bool> IsAuthenticatedAsync() {
         return authStore.HasValidTokensAsync();
     }
 
+    /// <inheritdoc />
     public async Task<string> StartAuthFlowAsync() {
         _codeVerifier = GenerateCodeVerifier();
         var codeChallenge = GenerateCodeChallenge(_codeVerifier);
@@ -51,6 +85,7 @@ public class TwitchOAuthService(
         return await Task.FromResult(authUrl);
     }
 
+    /// <inheritdoc />
     public async Task<bool> CompleteAuthFlowAsync(string authCode) {
         if (string.IsNullOrEmpty(_codeVerifier)) {
             logger.LogError("Code verifier missing - auth flow not started properly");
@@ -107,6 +142,7 @@ public class TwitchOAuthService(
         }
     }
 
+    /// <inheritdoc />
     public async Task<bool> RefreshTokenAsync() {
         var refreshToken = await authStore.GetRefreshTokenAsync();
 
@@ -188,6 +224,7 @@ public class TwitchOAuthService(
         return false;
     }
 
+    /// <inheritdoc />
     public async Task<string?> GetValidAccessTokenAsync() {
         var hasValid = await authStore.HasValidTokensAsync();
 
@@ -207,6 +244,7 @@ public class TwitchOAuthService(
         return null;
     }
 
+    /// <inheritdoc />
     public async Task LogoutAsync() {
         await authStore.ClearTokensAsync();
         logger.LogInformation("User logged out");

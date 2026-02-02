@@ -2,6 +2,39 @@ using Cliparino.Core.Models;
 
 namespace Cliparino.Core.Services;
 
+/// <summary>
+///     Orchestrates Twitch event sources, providing automatic failover between EventSub WebSockets and IRC fallback.
+/// </summary>
+/// <remarks>
+///     <para>
+///         This service maintains the primary connection to Twitch's EventSub via WebSockets. If the connection fails,
+///         it automatically falls back to IRC to ensure continuous event monitoring.
+///     </para>
+///     <para>
+///         Failover Logic: EventSub (Primary) &rarr; IRC (Fallback). It uses an exponential backoff policy for
+///         reconnection attempts.
+///     </para>
+///     <para>Dependencies:</para>
+///     <list type="bullet">
+///         <item>
+///             <description><see cref="TwitchEventSubWebSocketSource" />: Primary event source using modern WebSockets.</description>
+///         </item>
+///         <item>
+///             <description><see cref="TwitchIrcEventSource" />: Fallback event source using IRC.</description>
+///         </item>
+///         <item>
+///             <description><see cref="ICommandRouter" />: Routes parsed events to their respective handlers.</description>
+///         </item>
+///         <item>
+///             <description><see cref="IHealthReporter" />: Reports connection status and failover events.</description>
+///         </item>
+///     </list>
+///     <para>
+///         Thread-safety: Implemented as a <see cref="BackgroundService" />, processing events in a single-threaded loop
+///         per source.
+///     </para>
+///     <para>Lifecycle: Singleton hosted service.</para>
+/// </remarks>
 public class TwitchEventCoordinator : BackgroundService {
     private readonly BackoffPolicy _backoffPolicy = BackoffPolicy.Default;
     private readonly ICommandRouter _commandRouter;
@@ -14,6 +47,14 @@ public class TwitchEventCoordinator : BackgroundService {
     private int _reconnectAttempts;
     private bool _useEventSub = true;
 
+    /// <summary>
+    ///     Initializes a new instance of the <see cref="TwitchEventCoordinator" /> class.
+    /// </summary>
+    /// <param name="eventSubSource">The primary EventSub WebSocket source.</param>
+    /// <param name="ircSource">The fallback IRC source.</param>
+    /// <param name="commandRouter">The command router for event processing.</param>
+    /// <param name="logger">The logger instance.</param>
+    /// <param name="healthReporter">The health reporter instance.</param>
     public TwitchEventCoordinator(
         TwitchEventSubWebSocketSource eventSubSource,
         TwitchIrcEventSource ircSource,
@@ -28,6 +69,11 @@ public class TwitchEventCoordinator : BackgroundService {
         _healthReporter = healthReporter;
     }
 
+    /// <summary>
+    ///     Executes the coordination logic, managing connections and event processing.
+    /// </summary>
+    /// <param name="stoppingToken">Triggered when the host is shutting down.</param>
+    /// <returns>A task representing the background operation.</returns>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
         _logger.LogInformation("Twitch Event Coordinator starting...");
 

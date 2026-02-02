@@ -7,6 +7,37 @@ using Cliparino.Core.Models;
 
 namespace Cliparino.Core.Services;
 
+/// <summary>
+///     Implements Twitch Helix API client with automatic authentication and retry logic.
+/// </summary>
+/// <remarks>
+///     <para>
+///         This class implements <see cref="ITwitchHelixClient" /> by calling the Twitch Helix API
+///         (https://api.twitch.tv/helix) for all clip, user, channel, and chat operations.
+///     </para>
+///     <para>
+///         <strong>Key features:</strong><br />
+///         - Automatic Bearer token injection via <see cref="ITwitchOAuthService" /><br />
+///         - Retry logic with exponential backoff for transient failures (429, 5xx)<br />
+///         - Rate limit handling (respects 429 Retry-After header)<br />
+///         - Multiple clip URL format parsing (clips.twitch.tv and twitch.tv/user/clip/)<br />
+///         - JSON deserialization of Helix API responses
+///     </para>
+///     <para>
+///         Dependencies:
+///         - <see cref="ITwitchOAuthService" /> - OAuth token management
+///         - <see cref="ILogger{TCategoryName}" /> - Structured logging
+///         - <see cref="IHttpClientFactory" /> - HTTP client for API calls
+///         - <see cref="IConfiguration" /> - Client ID configuration
+///     </para>
+///     <para>
+///         Thread-safety: Stateless except for injected dependencies. Safe to call from multiple
+///         threads concurrently. HTTP client is thread-safe.
+///     </para>
+///     <para>
+///         Lifecycle: Registered as a singleton.
+///     </para>
+/// </remarks>
 public class TwitchHelixClient : ITwitchHelixClient {
     private static readonly Regex ClipUrlRegex = new(@"clips\.twitch\.tv/([A-Za-z0-9_-]+)", RegexOptions.Compiled);
     private static readonly Regex ClipSlugRegex = new(@"twitch\.tv/\w+/clip/([A-Za-z0-9_-]+)", RegexOptions.Compiled);
@@ -28,6 +59,7 @@ public class TwitchHelixClient : ITwitchHelixClient {
                     throw new InvalidOperationException("Twitch:ClientId not configured");
     }
 
+    /// <inheritdoc />
     public async Task<ClipData?> GetClipByIdAsync(string clipId) {
         if (string.IsNullOrWhiteSpace(clipId)) {
             _logger.LogWarning("GetClipByIdAsync called with empty clip ID");
@@ -53,6 +85,7 @@ public class TwitchHelixClient : ITwitchHelixClient {
         }
     }
 
+    /// <inheritdoc />
     public async Task<ClipData?> GetClipByUrlAsync(string clipUrl) {
         if (string.IsNullOrWhiteSpace(clipUrl)) {
             _logger.LogWarning("GetClipByUrlAsync called with empty URL");
@@ -71,6 +104,7 @@ public class TwitchHelixClient : ITwitchHelixClient {
         return await GetClipByIdAsync(clipId);
     }
 
+    /// <inheritdoc />
     public async Task<IReadOnlyList<ClipData>> GetClipsByBroadcasterAsync(
         string broadcasterId,
         int count = 20,
@@ -100,6 +134,7 @@ public class TwitchHelixClient : ITwitchHelixClient {
         }
     }
 
+    /// <inheritdoc />
     public async Task<string?> GetBroadcasterIdByNameAsync(string broadcasterName) {
         if (string.IsNullOrWhiteSpace(broadcasterName)) {
             _logger.LogWarning("GetBroadcasterIdByNameAsync called with empty broadcaster name");
@@ -142,6 +177,7 @@ public class TwitchHelixClient : ITwitchHelixClient {
         }
     }
 
+    /// <inheritdoc />
     public async Task<string?> GetAuthenticatedUserIdAsync() {
         try {
             var url = "https://api.twitch.tv/helix/users";
@@ -177,6 +213,7 @@ public class TwitchHelixClient : ITwitchHelixClient {
         }
     }
 
+    /// <inheritdoc />
     public async Task<(string? GameName, string? BroadcasterDisplayName)> GetChannelInfoAsync(string broadcasterId) {
         if (string.IsNullOrWhiteSpace(broadcasterId)) {
             _logger.LogWarning("GetChannelInfoAsync called with empty broadcaster ID");
@@ -220,6 +257,7 @@ public class TwitchHelixClient : ITwitchHelixClient {
         }
     }
 
+    /// <inheritdoc />
     public async Task<bool> SendChatMessageAsync(string broadcasterId, string message) {
         if (string.IsNullOrWhiteSpace(broadcasterId) || string.IsNullOrWhiteSpace(message)) {
             _logger.LogWarning("SendChatMessageAsync called with empty broadcaster ID or message");
@@ -275,6 +313,7 @@ public class TwitchHelixClient : ITwitchHelixClient {
         }
     }
 
+    /// <inheritdoc />
     public async Task<bool> SendShoutoutAsync(string fromBroadcasterId, string toBroadcasterId) {
         if (string.IsNullOrWhiteSpace(fromBroadcasterId) || string.IsNullOrWhiteSpace(toBroadcasterId)) {
             _logger.LogWarning("SendShoutoutAsync called with empty broadcaster IDs");
