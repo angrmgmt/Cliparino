@@ -1,11 +1,350 @@
-The files in the src and src/Managers directories of the Cliparino project folder constitute the primary code portion of the app.
-The only difference between them and what is in the .sb file is all the documentation comments and linter directives and stuff that Streamer.bot doesn't really know what to do with.
-Speaking of which, feel free to set up automation making use of the FileProcessor project's FileCleaner app, which will make the Streamer.bot-friendly file automatically for you.
-I used the dotnet run approach, but you do you.
+# Contributing to Cliparino
 
-Pull requests are welcome.
-For major changes, please open an issue first to discuss what you would like to change.
+Thank you for your interest in contributing to Cliparino! This document provides guidelines and instructions for contributing to the project.
 
-For your convenience, here are a couple templates to use. Enjoy!
-- [Bugfix](https://github.com/angrmgmt/Cliparino/compare?title=Bugfix%20Request&body=%23%23%20Bugfix%20Pull%20Request%0A%0A%23%23%23%20Description%0APlease%20provide%20a%20clear%20and%20concise%20description%20of%20the%20bug%20and%20the%20fix.%0A%0A%23%23%23%20Related%20Issue%0AIf%20applicable%2C%20please%20provide%20a%20link%20to%20the%20related%20issue.%0A%0A%23%23%23%20How%20Has%20This%20Been%20Tested%3F%0APlease%20describe%20the%20tests%20that%20you%20ran%20to%20verify%20your%20changes.%20Provide%20instructions%20so%20we%20can%20reproduce.%0A%0A-%20%5B%20%5D%20Test%20A%0A-%20%5B%20%5D%20Test%20B%0A%0A%23%23%23%20Screenshots%20(if%20appropriate)%3A%0AIf%20applicable%2C%20add%20screenshots%20to%20help%20explain%20your%20problem%20and%20solution.%0A%0A%23%23%23%20Checklist%3A%0A-%20%5B%20%5D%20My%20code%20follows%20the%20style%20guidelines%20of%20this%20project%0A-%20%5B%20%5D%20I%20have%20performed%20a%20self-review%20of%20my%20own%20code%0A-%20%5B%20%5D%20I%20have%20commented%20my%20code%2C%20particularly%20in%20hard-to-understand%20areas%0A-%20%5B%20%5D%20I%20have%20made%20corresponding%20changes%20to%20the%20documentation%0A-%20%5B%20%5D%20My%20changes%20generate%20no%20new%20warnings%0A-%20%5B%20%5D%20I%20have%20added%20tests%20that%20prove%20my%20fix%20is%20effective%20or%20that%20my%20feature%20works%0A-%20%5B%20%5D%20New%20and%20existing%20unit%20tests%20pass%20locally%20with%20my%20changes%0A-%20%5B%20%5D%20Any%20dependent%20changes%20have%20been%20merged%20and%20published%20in%20downstream%20modules)
-- [Feature](https://github.com/angrmgmt/Cliparino/compare?title=New%20Feature%20Request&body=%23%23%20Feature%3A%20%5BFeature%20Name%5D%0A%0A%23%23%23%20Description%0AProvide%20a%20detailed%20description%20of%20the%20feature%20being%20implemented.%20Include%20the%20purpose%20and%20functionality%20of%20the%20feature.%0A%0A%23%23%23%20Related%20Issue%0AIf%20applicable%2C%20mention%20any%20related%20issues%20or%20link%20to%20the%20issue%20number.%0A%0A%23%23%23%20Implementation%20Details%0ADescribe%20how%20the%20feature%20was%20implemented.%20Include%20information%20about%20any%20new%20files%2C%20functions%2C%20or%20changes%20to%20existing%20code.%0A%0A%23%23%23%20Testing%0AExplain%20how%20the%20feature%20was%20tested.%20Include%20details%20about%20any%20unit%20tests%2C%20integration%20tests%2C%20or%20manual%20testing%20performed.%0A%0A%23%23%23%20Checklist%0A-%20%5B%20%5D%20I%20have%20performed%20a%20self-review%20of%20my%20own%20code%0A-%20%5B%20%5D%20I%20have%20commented%20my%20code%2C%20particularly%20in%20hard-to-understand%20areas%0A-%20%5B%20%5D%20I%20have%20made%20corresponding%20changes%20to%20the%20documentation%0A-%20%5B%20%5D%20I%20have%20added%20tests%20that%20prove%20my%20fix%20is%20effective%20or%20that%20my%20feature%20works%0A-%20%5B%20%5D%20New%20and%20existing%20unit%20tests%20pass%20locally%20with%20my%20changes%0A-%20%5B%20%5D%20Any%20dependent%20changes%20have%20been%20merged%20and%20published%20in%20downstream%20modules%0A%0A%23%23%23%20Screenshots%20(if%20applicable)%0AIf%20applicable%2C%20add%20screenshots%20to%20help%20explain%20your%20feature.)
+## Table of Contents
+
+- [Code of Conduct](#code-of-conduct)
+- [How Can I Contribute?](#how-can-i-contribute)
+- [Development Setup](#development-setup)
+- [Project Structure](#project-structure)
+- [Coding Standards](#coding-standards)
+- [Testing Guidelines](#testing-guidelines)
+- [Pull Request Process](#pull-request-process)
+- [FileProcessor Usage](#fileprocessor-usage)
+
+## Code of Conduct
+
+This project adheres to the [Contributor Covenant Code of Conduct](./CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to angrmgmt@gmail.com.
+
+## How Can I Contribute?
+
+### Reporting Bugs
+
+Before creating bug reports, please check the [issue tracker](https://github.com/angrmgmt/Cliparino/issues) to avoid duplicates. When creating a bug report, include:
+
+- **Clear title and description**
+- **Steps to reproduce** the issue
+- **Expected vs. actual behavior**
+- **Streamer.bot version** and **OBS version**
+- **Log excerpts** (with tokens redacted)
+- **Screenshots or videos** if applicable
+
+### Suggesting Features
+
+Feature suggestions are welcome! Please:
+
+- **Open an issue** with a clear title and description
+- **Explain the use case** and how it benefits users
+- **Consider implementation complexity**
+- **Discuss alternatives** you've considered
+
+### Pull Requests
+
+Pull requests are welcome! For major changes:
+
+1. **Open an issue first** to discuss the proposed changes
+2. **Fork the repository** and create a feature branch
+3. **Follow coding standards** outlined below
+4. **Test thoroughly** before submitting
+5. **Update documentation** as needed
+
+## Development Setup
+
+### Prerequisites
+
+- **.NET Framework 4.8.1** (or .NET SDK with Framework targeting)
+- **Visual Studio 2019+**, **JetBrains Rider**, or **VS Code**
+- **Git** for version control
+- **Streamer.bot** (v0.2.6+) for testing
+- **OBS Studio** for integration testing
+
+### Setup Steps
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/angrmgmt/Cliparino.git
+   cd Cliparino
+   ```
+
+2. **Open the solution**
+   ```bash
+   # Visual Studio / Rider
+   start Cliparino.sln
+   
+   # Or use VS Code with C# extension
+   code .
+   ```
+
+3. **Restore dependencies**
+   Dependencies are referenced from the Streamer.bot installation directory. Ensure Streamer.bot is installed at `%AppData%\Streamer.bot\`.
+
+4. **Build the project**
+   ```bash
+   dotnet build Cliparino/Cliparino.csproj
+   ```
+
+## Project Structure
+
+### Source Code Organization
+
+```
+Cliparino/src/
+├── CPHInline.cs              # Main entry point, command routing
+├── Constants/
+│   └── CliparinoConstants.cs # All constants and user messages
+├── Managers/
+│   ├── ClipManager.cs        # Clip operations, caching, search
+│   ├── TwitchApiManager.cs   # Twitch API interactions
+│   ├── ObsSceneManager.cs    # OBS scene/source management
+│   ├── HttpManager.cs        # Embedded HTTP server
+│   └── CPHLogger.cs          # Logging utilities
+└── Utilities/
+    ├── ValidationHelper.cs    # Input validation methods
+    ├── InputProcessor.cs      # Input parsing logic
+    ├── ConfigurationManager.cs # Settings retrieval
+    ├── ErrorHandler.cs        # Error handling utilities
+    ├── RetryHelper.cs         # Retry logic with backoff
+    ├── ManagerFactory.cs      # Dependency creation
+    └── HttpResponseBuilder.cs # HTTP response builders
+```
+
+### Key Files
+
+- **CPHInline.cs**: Main entry point implementing Streamer.bot's `CPHInlineBase`. Contains command routing logic.
+- **Manager classes**: Encapsulate domain logic (clips, Twitch, OBS, HTTP)
+- **Utility classes**: Provide reusable functionality across the codebase
+- **Constants**: Centralized constants to eliminate magic numbers/strings
+
+### Understanding the Workflow
+
+1. User issues command in Twitch chat
+2. Streamer.bot invokes `CPHInline.Execute()`
+3. Command is routed to appropriate handler method
+4. Managers perform operations (fetch clip, configure OBS, serve content)
+5. Result is returned to Streamer.bot
+
+## Coding Standards
+
+### C# Style Guide
+
+#### Naming Conventions
+
+- **Classes, Methods, Properties**: `PascalCase`
+- **Private Fields**: `_camelCase` (leading underscore)
+- **Local Variables, Parameters**: `camelCase`
+- **Constants**: `PascalCase`
+
+```csharp
+public class ClipManager {
+    private readonly IInlineInvokeProxy _cph;
+    private string _lastClipUrl;
+    
+    public async Task<ClipData> GetClipDataAsync(string url) {
+        var clipId = ExtractClipId(url);
+        return await FetchClipAsync(clipId);
+    }
+}
+```
+
+#### Brace Style
+
+Use **One True Brace Style (OTB)**: Opening brace on same line.
+
+```csharp
+public bool Execute() {
+    if (condition) {
+        DoSomething();
+    } else {
+        DoSomethingElse();
+    }
+}
+```
+
+#### Documentation
+
+- **Public APIs**: Require XML documentation comments
+- **Complex Logic**: Add inline comments explaining "why", not "what"
+- **Magic Numbers**: Replace with named constants
+
+```csharp
+/// <summary>
+///     Retrieves clip data from the Twitch API.
+/// </summary>
+/// <param name="url">The Twitch clip URL.</param>
+/// <returns>ClipData object or null if not found.</returns>
+public async Task<ClipData> GetClipDataAsync(string url) {
+    // Implementation
+}
+```
+
+### Design Principles
+
+- **DRY (Don't Repeat Yourself)**: Extract common logic into utilities
+- **Single Responsibility**: Each class/method has one clear purpose
+- **Fail-Safe Defaults**: Provide sensible defaults, validate inputs
+- **Error Handling**: Use try-catch with proper logging, never swallow exceptions
+
+### Constants and Configuration
+
+- Add new constants to `CliparinoConstants`
+- Group related constants in nested classes
+- Use `ConfigurationManager` for retrieving settings from Streamer.bot
+
+```csharp
+public static class CliparinoConstants {
+    public static class Http {
+        public const int BasePort = 8080;
+        public const int MaxPortRetries = 10;
+    }
+}
+```
+
+## Testing Guidelines
+
+### Manual Testing
+
+Since Cliparino integrates with Streamer.bot and OBS, manual testing is essential:
+
+1. **Build the project**
+   ```bash
+   dotnet build Cliparino/Cliparino.csproj
+   ```
+
+2. **Generate Streamer.bot-compatible file**
+   ```bash
+   dotnet run --project FileProcessor/FileProcessor.csproj
+   ```
+
+3. **Import into Streamer.bot**
+   - Copy contents of `Output/Cliparino_Clean.cs`
+   - Import into Streamer.bot as inline code
+
+4. **Test each command**
+   - `!watch <url>`
+   - `!watch @username search terms`
+   - `!so username`
+   - `!replay`
+   - `!stop`
+
+5. **Verify OBS integration**
+   - Check scene creation
+   - Verify browser source configuration
+   - Test clip playback
+
+### Test Checklist
+
+- [ ] All commands execute without errors
+- [ ] Clips play correctly in OBS
+- [ ] Queue behavior works as expected
+- [ ] Moderator approval works (search)
+- [ ] Shoutouts trigger correctly
+- [ ] Error messages are user-friendly
+- [ ] Logging output is meaningful
+
+## Pull Request Process
+
+### Before Submitting
+
+1. **Sync with main branch**
+   ```bash
+   git fetch origin
+   git rebase origin/main
+   ```
+
+2. **Build successfully**
+   ```bash
+   dotnet build Cliparino/Cliparino.csproj
+   ```
+
+3. **Test thoroughly** using manual testing checklist
+
+4. **Update documentation** if you've changed:
+   - Public APIs
+   - User-facing features
+   - Configuration options
+
+5. **Generate clean file** for Streamer.bot
+   ```bash
+   dotnet run --project FileProcessor/FileProcessor.csproj
+   ```
+
+### Pull Request Templates
+
+Use the appropriate template for your PR:
+
+- [**Bugfix Request**](https://github.com/angrmgmt/Cliparino/compare?title=Bugfix%20Request)
+- [**Feature Request**](https://github.com/angrmgmt/Cliparino/compare?title=New%20Feature%20Request)
+
+### PR Description Should Include
+
+- **Summary**: Brief description of changes
+- **Motivation**: Why is this change needed?
+- **Implementation**: How did you implement it?
+- **Testing**: How was it tested?
+- **Breaking Changes**: Any backward compatibility issues?
+- **Related Issues**: Link to related issue(s)
+
+### Review Process
+
+1. Maintainers will review your PR
+2. Address any feedback or requested changes
+3. Once approved, your PR will be merged
+4. Your contribution will be included in the next release!
+
+## FileProcessor Usage
+
+The **FileProcessor** project prepares C# source code for Streamer.bot compatibility by:
+
+- Consolidating multiple files into a single file
+- Removing XML documentation comments
+- Removing `#region` directives
+- Removing pragma directives
+- Cleaning up extra whitespace
+
+### Running FileProcessor
+
+```bash
+# From repository root
+dotnet run --project FileProcessor/FileProcessor.csproj
+```
+
+**Output**: `Output/Cliparino_Clean.cs`
+
+### How It Works
+
+The `FileCleaner` class:
+
+1. Reads all `.cs` files from `Cliparino/src/`
+2. Extracts and consolidates `using` statements
+3. Removes comments and regions
+4. Combines all classes into a single file
+5. Outputs to `Output/Cliparino_Clean.cs`
+
+**Important**: Always run FileProcessor before importing into Streamer.bot. The raw source files contain documentation that Streamer.bot doesn't support.
+
+### Automation Tip
+
+You can create a build script to automate this:
+
+**build.bat** (Windows)
+```batch
+@echo off
+echo Building Cliparino...
+dotnet build Cliparino/Cliparino.csproj
+if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
+
+echo Generating Streamer.bot file...
+dotnet run --project FileProcessor/FileProcessor.csproj
+echo Done! Import Output/Cliparino_Clean.cs into Streamer.bot
+```
+
+## Questions?
+
+If you have questions about contributing:
+
+- **Open an issue** for clarification
+- **Email**: angrmgmt@gmail.com
+- **Check existing issues** for similar questions
+
+Thank you for contributing to Cliparino! 🎉
