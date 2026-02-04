@@ -10,7 +10,7 @@
 
 Cliparino is a standalone Windows tray application for playing Twitch clips during streams. Built with a "just works" philosophy, it provides intelligent clip search, automatic OBS integration, self-healing reliability, and comprehensive queue management.
 
-> **Note**: This describes the **modern rewrite** (.NET 8). The legacy Streamer.bot version is archived in [`/legacy/`](./legacy/). See [Development Status](#development-status) for progress.
+> **Note**: This is the **modern standalone version** (.NET 8). The legacy Streamer.bot plugin version is archived in [`/legacy/`](./legacy/).
 
 ## Key Features
 
@@ -51,17 +51,27 @@ Cliparino is a standalone Windows tray application for playing Twitch clips duri
 
 ## Installation
 
-> **⚠️ Development Status**: The modern rewrite is currently under active development. End-user releases are not yet available. See [Development Status](#development-status) below for progress.
+### For End Users
 
-### For End Users (Coming Soon)
+1. **Download** the latest installer from the [Releases page](https://github.com/angrmgmt/Cliparino/releases)
+2. **Run** the installer (`Cliparino-X.Y.Z-Setup.exe`)
+   - Accept the LGPL 2.1 license agreement
+   - Choose installation directory (default: `C:\Program Files\Cliparino`)
+   - Optionally enable "Start with Windows"
+3. **Configure** Twitch application credentials (see [wiki installation guide](https://github.com/angrmgmt/Cliparino/wiki/Installation) for details)
+4. **Authenticate** with Twitch via the tray menu
+5. **Connect** to OBS (Cliparino will auto-detect and configure scenes/sources)
+6. **Start playing clips** using chat commands
 
-Installation will be:
-1. Download the installer from Releases
-2. Run the installer (includes .NET 8 if needed)
-3. Launch Cliparino from system tray
-4. Connect Twitch account via OAuth
-5. Connect to OBS (automatically detects local OBS instance)
-6. Configure settings and start using commands
+For detailed setup instructions including Twitch application registration and configuration options, see the [**Installation wiki page**](https://github.com/angrmgmt/Cliparino/wiki/Installation).
+
+### Automatic Updates
+
+Cliparino automatically checks for updates:
+- **On startup** (10 seconds after launch)
+- **Periodically** every 24 hours (configurable via `Update:CheckIntervalHours` in `appsettings.json`)
+
+When a new version is available, Cliparino logs the update information including the download URL. Updates are **not installed automatically** - download and run the new installer from the [Releases page](https://github.com/angrmgmt/Cliparino/releases) to upgrade. Your settings will be preserved during the upgrade process.
 
 ### For Developers
 
@@ -353,9 +363,9 @@ Periodic health checks, automatic reconnection with exponential backoff, drift c
 
 ## Development Status
 
-The modern rewrite is progressing through phased milestones. See [`/docs/PLAN.MD`](./docs/PLAN.MD) for the complete roadmap and [`/docs/PARITY_CHECKLIST.md`](./docs/PARITY_CHECKLIST.md) for feature parity tracking.
+**Cliparino is feature-complete and ready for production use.** All core milestones have been achieved. See [`/docs/PLAN.MD`](./docs/PLAN.MD) for the complete development roadmap and [`/docs/PARITY_CHECKLIST.md`](./docs/PARITY_CHECKLIST.md) for feature parity tracking.
 
-### Milestone Progress
+### Milestone Summary
 
 | Milestone | Status | Description |
 |-----------|--------|-------------|
@@ -368,7 +378,7 @@ The modern rewrite is progressing through phased milestones. See [`/docs/PLAN.MD
 | M6 | ✅ Complete | Fuzzy search + mod-approval gate |
 | M7 | ✅ Complete | "Just Works" polish |
 
-> All core milestones achieved! Now ready for packaging, deployment, and end-user testing.
+For installation instructions and user documentation, visit the [**wiki**](https://github.com/angrmgmt/Cliparino/wiki).
 
 ## Development
 
@@ -422,6 +432,7 @@ Copyright (C) 2024 Scott Mongrain - angrmgmt@gmail.com
 ## Links
 
 - **Repository**: [github.com/angrmgmt/Cliparino](https://github.com/angrmgmt/Cliparino)
+- **Wiki**: [Documentation & Guides](https://github.com/angrmgmt/Cliparino/wiki)
 - **Releases**: [Latest Release](https://github.com/angrmgmt/Cliparino/releases/latest)
 - **Issues**: [Report a Bug](https://github.com/angrmgmt/Cliparino/issues/new)
 - **Discussions**: [GitHub Discussions](https://github.com/angrmgmt/Cliparino/discussions)
