@@ -1,0 +1,133 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  DOTNET_VERSION: '8.0.x'
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET 8
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Extract version from tag
+      id: version
+      shell: bash
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+    - name: Update version in project file
+      shell: pwsh
+      run: |
+        $version = "${{ steps.version.outputs.VERSION }}"
+        $csproj = "src/Cliparino.Core/Cliparino.Core.csproj"
+        $content = Get-Content $csproj -Raw
+        $content = $content -replace '<Version>.*?</Version>', "<Version>$version</Version>"
+        $content = $content -replace '<AssemblyVersion>.*?</AssemblyVersion>', "<AssemblyVersion>$version.0</AssemblyVersion>"
+        $content = $content -replace '<FileVersion>.*?</FileVersion>', "<FileVersion>$version.0</FileVersion>"
+        Set-Content $csproj $content
+
+    - name: Restore dependencies
+      run: dotnet restore Cliparino.sln
+
+    - name: Build solution
+      run: dotnet build Cliparino.sln --configuration Release --no-restore
+
+    - name: Run tests
+      run: dotnet test Cliparino.sln --configuration Release --no-build --verbosity normal
+
+    - name: Publish self-contained application
+      run: dotnet publish src/Cliparino.Core/Cliparino.Core.csproj --configuration Release --runtime win-x64 --self-contained true --output src/Cliparino.Core/bin/Release/net8.0-windows/win-x64/publish
+
+    - name: Generate placeholder icon if missing
+      shell: pwsh
+      run: |
+        $iconPath = "assets/cliparino.ico"
+        if (-not (Test-Path $iconPath)) {
+          # Create a simple 1x1 pixel ICO file as placeholder
+          # ICO header + 1 image entry + BMP data for 16x16 image
+          $icoHeader = [byte[]](0,0,1,0,1,0)  # Reserved, Type=1 (ICO), Count=1
+          $imageEntry = [byte[]](16,16,0,0,1,0,32,0,40,4,0,0,22,0,0,0)  # 16x16, 32bpp, size, offset
+
+          # BITMAPINFOHEADER for 16x16 32bpp
+          $bmpHeader = [byte[]](40,0,0,0,16,0,0,0,32,0,0,0,1,0,32,0,0,0,0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+
+          # Pixel data: 16x16 pixels, 4 bytes each (BGRA), blue color
+          $pixels = New-Object byte[] 1024
+          for ($i = 0; $i -lt 256; $i++) {
+            $offset = $i * 4
+            $pixels[$offset] = 200     # Blue
+            $pixels[$offset+1] = 100   # Green
+            $pixels[$offset+2] = 50    # Red
+            $pixels[$offset+3] = 255   # Alpha
+          }
+
+          $bytes = $icoHeader + $imageEntry + $bmpHeader + $pixels
+          [System.IO.File]::WriteAllBytes($iconPath, $bytes)
+          Write-Host "Created placeholder icon at $iconPath"
+        } else {
+          Write-Host "Icon already exists at $iconPath"
+        }
+
+    - name: Copy icon to publish folder
+      shell: pwsh
+      run: |
+        $srcIcon = "assets/cliparino.ico"
+        if (Test-Path $srcIcon) {
+          Copy-Item $srcIcon "src/Cliparino.Core/cliparino.ico" -Force
+        }
+
+    - name: Install Inno Setup
+      shell: pwsh
+      run: |
+        choco install innosetup --yes --no-progress
+        echo "C:\Program Files (x86)\Inno Setup 6" >> $env:GITHUB_PATH
+
+    - name: Update installer version
+      shell: pwsh
+      run: |
+        $version = "${{ steps.version.outputs.VERSION }}"
+        $issFile = "installer/Cliparino.iss"
+        $content = Get-Content $issFile -Raw
+        $content = $content -replace '#define MyAppVersion ".*?"', "#define MyAppVersion `"$version`""
+        Set-Content $issFile $content
+
+    - name: Compile installer
+      shell: pwsh
+      run: |
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer/Cliparino.iss"
+
+    - name: List output directory
+      shell: pwsh
+      run: Get-ChildItem -Path out -Recurse
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        name: Cliparino v${{ steps.version.outputs.VERSION }}
+        draft: false
+        prerelease: ${{ contains(steps.version.outputs.VERSION, '-') }}
+        generate_release_notes: true
+        files: |
+          out/Cliparino-${{ steps.version.outputs.VERSION }}-Setup.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Upload installer artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: installer
+        path: out/Cliparino-*.exe
+        retention-days: 30
