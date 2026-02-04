@@ -49,45 +49,30 @@ jobs:
       run: dotnet test Cliparino.sln --configuration Release --no-build --verbosity normal
 
     - name: Publish self-contained application
-      run: dotnet publish src/Cliparino.Core/Cliparino.Core.csproj --configuration Release --runtime win-x64 --self-contained true --output src/Cliparino.Core/bin/Release/net8.0-windows/win-x64/publish
+      run: dotnet publish src/Cliparino.Core/Cliparino.Core.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true --output src/Cliparino.Core/bin/Release/net8.0-windows/win-x64/publish
 
-    - name: Generate placeholder icon if missing
+    - name: Verify publish output
       shell: pwsh
       run: |
-        $iconPath = "assets/cliparino.ico"
-        if (-not (Test-Path $iconPath)) {
-          # Create a simple 1x1 pixel ICO file as placeholder
-          # ICO header + 1 image entry + BMP data for 16x16 image
-          $icoHeader = [byte[]](0,0,1,0,1,0)  # Reserved, Type=1 (ICO), Count=1
-          $imageEntry = [byte[]](16,16,0,0,1,0,32,0,40,4,0,0,22,0,0,0)  # 16x16, 32bpp, size, offset
-
-          # BITMAPINFOHEADER for 16x16 32bpp
-          $bmpHeader = [byte[]](40,0,0,0,16,0,0,0,32,0,0,0,1,0,32,0,0,0,0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
-
-          # Pixel data: 16x16 pixels, 4 bytes each (BGRA), blue color
-          $pixels = New-Object byte[] 1024
-          for ($i = 0; $i -lt 256; $i++) {
-            $offset = $i * 4
-            $pixels[$offset] = 200     # Blue
-            $pixels[$offset+1] = 100   # Green
-            $pixels[$offset+2] = 50    # Red
-            $pixels[$offset+3] = 255   # Alpha
-          }
-
-          $bytes = $icoHeader + $imageEntry + $bmpHeader + $pixels
-          [System.IO.File]::WriteAllBytes($iconPath, $bytes)
-          Write-Host "Created placeholder icon at $iconPath"
-        } else {
-          Write-Host "Icon already exists at $iconPath"
+        $publishDir = "src/Cliparino.Core/bin/Release/net8.0-windows/win-x64/publish"
+        Write-Host "Checking publish directory: $publishDir"
+        if (-not (Test-Path $publishDir)) {
+          Write-Error "Publish directory does not exist!"
+          exit 1
         }
+        Write-Host "Published files:"
+        Get-ChildItem -Path $publishDir -Recurse | ForEach-Object { Write-Host $_.FullName }
 
-    - name: Copy icon to publish folder
+        $exe = Join-Path $publishDir "Cliparino.Core.exe"
+        if (-not (Test-Path $exe)) {
+          Write-Error "Cliparino.Core.exe not found in publish output!"
+          exit 1
+        }
+        Write-Host "Executable found: $exe"
+
+    - name: Create output directory
       shell: pwsh
-      run: |
-        $srcIcon = "assets/cliparino.ico"
-        if (Test-Path $srcIcon) {
-          Copy-Item $srcIcon "src/Cliparino.Core/cliparino.ico" -Force
-        }
+      run: New-Item -ItemType Directory -Force -Path out
 
     - name: Install Inno Setup
       shell: pwsh

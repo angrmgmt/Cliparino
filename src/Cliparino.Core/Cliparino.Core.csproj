@@ -9,7 +9,7 @@
         <Version>2.0.0</Version>
         <AssemblyVersion>2.0.0.0</AssemblyVersion>
         <FileVersion>2.0.0.0</FileVersion>
-        <ApplicationIcon Condition="Exists('cliparino.ico')">cliparino.ico</ApplicationIcon>
+        <ApplicationIcon>cliparino.ico</ApplicationIcon>
     </PropertyGroup>
 
     <PropertyGroup Condition="'$(PublishSingleFile)' == 'true'">
