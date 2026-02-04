@@ -1,0 +1,43 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 20010904//EN" "http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd">
+<!-- Created using Krita: https://krita.org -->
+<svg xmlns="http://www.w3.org/2000/svg" 
+    xmlns:xlink="http://www.w3.org/1999/xlink"
+    xmlns:krita="http://krita.org/namespaces/svg/krita"
+    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+    width="384pt"
+    height="384pt"
+    viewBox="0 0 384 384">
+<defs>
+  <linearGradient id="gradient0" gradientUnits="objectBoundingBox" x1="0" y1="0" x2="1" y2="1" spreadMethod="pad">
+   <stop stop-color="#6b4eff" offset="0" stop-opacity="1"/>
+   <stop stop-color="#4b2fa8" offset="1" stop-opacity="1"/>
+  </linearGradient>
+  <linearGradient id="gradient1" gradientUnits="objectBoundingBox" x1="0" y1="0" x2="1" y2="1" spreadMethod="pad">
+   <stop stop-color="#1a1236" offset="0" stop-opacity="1"/>
+   <stop stop-color="#0e0b1f" offset="1" stop-opacity="1"/>
+  </linearGradient>
+  <linearGradient id="gradient2" gradientUnits="objectBoundingBox" x1="0" y1="0" x2="1" y2="1" spreadMethod="pad">
+   <stop stop-color="#ff4edb" offset="0" stop-opacity="1"/>
+   <stop stop-color="#c700b7" offset="1" stop-opacity="1"/>
+  </linearGradient>
+  <linearGradient id="gradient3" gradientUnits="objectBoundingBox" x1="0" y1="0" x2="1" y2="1" spreadMethod="pad">
+   <stop stop-color="#5af3ff" offset="0" stop-opacity="1"/>
+   <stop stop-color="#5af3ff" offset="1" stop-opacity="0"/>
+  </linearGradient>
+ </defs>
+<g id="group0" transform="translate(42, 72)" fill="none">
+  <rect id="shape0" transform="matrix(0.75 0 0 0.75 7.105427357601e-15 0)" fill="url(#gradient0)" stroke-opacity="0" stroke="#000000" stroke-width="0" stroke-linecap="square" stroke-linejoin="bevel" width="400" height="320" rx="56" ry="56"/>
+  <rect id="shape1" transform="matrix(0.75 0 0 0.75 27 27)" opacity="0.95" fill="#3d268f" stroke-opacity="0" stroke="#000000" stroke-width="0" stroke-linecap="square" stroke-linejoin="bevel" width="70" height="248" rx="28" ry="28"/>
+  <g id="group1" transform="matrix(0.75 0 0 0.75 -42 -68.9687500040408)" opacity="0.95" fill="none">
+   <rect id="shape2" transform="translate(108, 140)" fill="#141022" stroke-opacity="0" stroke="#000000" stroke-width="0" stroke-linecap="square" stroke-linejoin="bevel" width="38" height="38" rx="10" ry="10"/>
+   <rect id="shape3" transform="translate(108, 202)" fill="#141022" stroke-opacity="0" stroke="#000000" stroke-width="0" stroke-linecap="square" stroke-linejoin="bevel" width="38" height="38" rx="10" ry="10"/>
+   <rect id="shape4" transform="translate(108, 264)" fill="#141022" stroke-opacity="0" stroke="#000000" stroke-width="0" stroke-linecap="square" stroke-linejoin="bevel" width="38" height="38" rx="10" ry="10"/>
+   <rect id="shape5" transform="translate(108, 326)" fill="#141022" stroke-opacity="0" stroke="#000000" stroke-width="0" stroke-linecap="square" stroke-linejoin="bevel" width="38" height="38" rx="10" ry="10"/>
+  </g>
+  <rect id="shape6" transform="matrix(0.75 0 0 0.75 78 30)" fill="url(#gradient1)" stroke-opacity="0" stroke="#000000" stroke-width="0" stroke-linecap="square" stroke-linejoin="bevel" width="272" height="240" rx="40" ry="40"/>
+  <path id="shape7" transform="matrix(0.75 0 0 0.75 142.640624791913 69.093750263694)" fill="url(#gradient2)" stroke-opacity="0" stroke="#000000" stroke-width="0" stroke-linecap="square" stroke-linejoin="bevel" d="M0 0L0 136L108 68Z" sodipodi:nodetypes="cccc"/>
+  <path id="shape8" transform="matrix(0.666698903921744 0.343529578798602 -0.343529578798602 0.666698903921744 259.649621584339 19.4100085002095)" fill="url(#gradient3)" stroke-opacity="0" stroke="#000000" stroke-width="0" stroke-linecap="square" stroke-linejoin="bevel" d="M0 0L42 0L14 54Z" sodipodi:nodetypes="cccc"/>
+  <path id="shape9" transform="matrix(0.666698903921744 0.343529578798602 -0.343529578798602 0.666698903921744 263.694008272607 27.917220937974)" opacity="0.75" fill="#5af3ff" stroke-opacity="0" stroke="#000000" stroke-width="0" stroke-linecap="square" stroke-linejoin="bevel" d="M0 0L22 0L6 32Z" sodipodi:nodetypes="cccc"/>
+ </g>
+</svg>

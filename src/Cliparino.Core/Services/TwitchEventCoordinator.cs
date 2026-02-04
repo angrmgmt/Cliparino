@@ -11,7 +11,7 @@ namespace Cliparino.Core.Services;
 ///         it automatically falls back to IRC to ensure continuous event monitoring.
 ///     </para>
 ///     <para>
-///         Failover Logic: EventSub (Primary) &rarr; IRC (Fallback). It uses an exponential backoff policy for
+///         Failover Logic: EventSub (Primary) -> IRC (Fallback). It uses an exponential backoff policy for
 ///         reconnection attempts.
 ///     </para>
 ///     <para>Dependencies:</para>
