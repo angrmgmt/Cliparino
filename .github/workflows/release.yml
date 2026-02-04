@@ -48,8 +48,11 @@ jobs:
     - name: Run tests
       run: dotnet test Cliparino.sln --configuration Release --no-build --verbosity normal
 
+    - name: Restore for publish (with runtime)
+      run: dotnet restore src/Cliparino.Core/Cliparino.Core.csproj --runtime win-x64
+
     - name: Publish self-contained application
-      run: dotnet publish src/Cliparino.Core/Cliparino.Core.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true --output src/Cliparino.Core/bin/Release/net8.0-windows/win-x64/publish
+      run: dotnet publish src/Cliparino.Core/Cliparino.Core.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true --output src/Cliparino.Core/bin/Release/net8.0-windows/win-x64/publish
 
     - name: Verify publish output
       shell: pwsh
@@ -61,14 +64,25 @@ jobs:
           exit 1
         }
         Write-Host "Published files:"
-        Get-ChildItem -Path $publishDir -Recurse | ForEach-Object { Write-Host $_.FullName }
+        Get-ChildItem -Path $publishDir -Recurse | ForEach-Object {
+          $size = if ($_.PSIsContainer) { "" } else { " ($([math]::Round($_.Length/1MB, 2)) MB)" }
+          Write-Host "$($_.FullName)$size"
+        }
 
         $exe = Join-Path $publishDir "Cliparino.Core.exe"
         if (-not (Test-Path $exe)) {
           Write-Error "Cliparino.Core.exe not found in publish output!"
           exit 1
         }
-        Write-Host "Executable found: $exe"
+
+        $exeSize = (Get-Item $exe).Length / 1MB
+        Write-Host "Executable size: $([math]::Round($exeSize, 2)) MB"
+
+        if ($exeSize -lt 50) {
+          Write-Error "Executable is too small ($([math]::Round($exeSize, 2)) MB) - self-contained publish likely failed!"
+          exit 1
+        }
+        Write-Host "Executable size verification passed"
 
     - name: Create output directory
       shell: pwsh
