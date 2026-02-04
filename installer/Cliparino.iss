@@ -28,7 +28,6 @@ Compression=lzma2
 SolidCompression=yes
 ; Appearance
 WizardStyle=modern
-SetupIconFile=..\assets\cliparino.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 ; Privileges
 PrivilegesRequired=lowest

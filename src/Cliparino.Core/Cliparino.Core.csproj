@@ -9,13 +9,11 @@
         <Version>2.0.0</Version>
         <AssemblyVersion>2.0.0.0</AssemblyVersion>
         <FileVersion>2.0.0.0</FileVersion>
-        <ApplicationIcon>cliparino.ico</ApplicationIcon>
+        <ApplicationIcon Condition="Exists('cliparino.ico')">cliparino.ico</ApplicationIcon>
     </PropertyGroup>
 
-    <PropertyGroup Condition="'$(Configuration)' == 'Release'">
-        <PublishSingleFile>true</PublishSingleFile>
+    <PropertyGroup Condition="'$(PublishSingleFile)' == 'true'">
         <SelfContained>true</SelfContained>
-        <RuntimeIdentifier>win-x64</RuntimeIdentifier>
         <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     </PropertyGroup>
 
