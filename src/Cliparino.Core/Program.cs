@@ -66,7 +66,7 @@ builder.Services.AddSingleton<IDiagnosticsService, DiagnosticsService>();
 builder.Services.AddSingleton<IUpdateChecker, UpdateChecker>();
 builder.Services.AddHostedService<PeriodicUpdateCheckService>();
 
-builder.WebHost.UseUrls("http://localhost:5290");
+builder.WebHost.UseUrls("https://localhost:5290", "http://localhost:5290");
 
 var app = builder.Build();
 

@@ -33,7 +33,7 @@ public class TrayApplicationContext : ApplicationContext {
     public TrayApplicationContext(IServiceProvider services) {
         _services = services ?? throw new ArgumentNullException(nameof(services));
         _trayIcon = new NotifyIcon {
-            Icon = SystemIcons.Application,
+            Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application,
             Text = "Cliparino - Twitch Clip Player",
             Visible = true,
             ContextMenuStrip = CreateContextMenu()

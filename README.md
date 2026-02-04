@@ -58,12 +58,11 @@ Cliparino is a standalone Windows tray application for playing Twitch clips duri
    - Accept the LGPL 2.1 license agreement
    - Choose installation directory (default: `C:\Program Files\Cliparino`)
    - Optionally enable "Start with Windows"
-3. **Configure** Twitch application credentials (see [wiki installation guide](https://github.com/angrmgmt/Cliparino/wiki/Installation) for details)
-4. **Authenticate** with Twitch via the tray menu
-5. **Connect** to OBS (Cliparino will auto-detect and configure scenes/sources)
-6. **Start playing clips** using chat commands
+3. **Authenticate** with Twitch via the tray menu
+4. **Connect** to OBS (Cliparino will auto-detect and configure scenes/sources)
+5. **Start playing clips** using chat commands
 
-For detailed setup instructions including Twitch application registration and configuration options, see the [**Installation wiki page**](https://github.com/angrmgmt/Cliparino/wiki/Installation).
+For detailed setup instructions and configuration options, see the [**Installation wiki page**](https://github.com/angrmgmt/Cliparino/wiki/Installation).
 
 ### Automatic Updates
 
