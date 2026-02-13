@@ -53,12 +53,10 @@ public interface IApprovalService {
     ///         The method automatically cleans up the pending request when complete (approved, denied, or timed out).
     ///     </para>
     /// </remarks>
-    Task<bool> RequestApprovalAsync(
-        ChatMessage requester,
+    Task<bool> RequestApprovalAsync(ChatMessage requester,
         ClipData clip,
         TimeSpan timeout,
-        CancellationToken cancellationToken = default
-    );
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     ///     Processes a chat message to determine if it's a response to a pending approval request.

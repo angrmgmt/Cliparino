@@ -174,13 +174,35 @@ public interface IObsController {
     ///         the OBS configuration hasn't been manually changed or corrupted.
     ///     </para>
     ///     <para>
-    ///         If drift is detected, the supervisor typically calls <see cref="EnsureClipSceneAndSourceExistsAsync" />
+    ///         If drift is detected, the supervisor typically calls <see cref="RepairConfigurationDriftAsync" />
     ///         to repair the configuration back to the desired state.
     ///     </para>
     /// </remarks>
-    Task<bool> CheckConfigurationDriftAsync(
-        string sceneName, string sourceName, string expectedUrl, int expectedWidth, int expectedHeight
-    );
+    Task<bool> CheckConfigurationDriftAsync(string sceneName, string sourceName, string expectedUrl, int expectedWidth,
+        int expectedHeight);
+
+    /// <summary>
+    ///     Repairs configuration drift by updating the source settings to match expected values.
+    /// </summary>
+    /// <param name="sourceName">The name of the source to repair</param>
+    /// <param name="expectedUrl">The expected browser source URL</param>
+    /// <param name="expectedWidth">The expected browser source width in pixels</param>
+    /// <param name="expectedHeight">The expected browser source height in pixels</param>
+    /// <returns>
+    ///     A task containing true if the repair was successful, or false if an error occurred.
+    /// </returns>
+    /// <remarks>
+    ///     <para>
+    ///         This method updates the browser source settings to match the expected configuration,
+    ///         correcting any drift detected by <see cref="CheckConfigurationDriftAsync" />.
+    ///     </para>
+    ///     <para>
+    ///         Upon successful repair, the <see cref="ConfigurationDriftRepaired" /> event is raised
+    ///         to notify subscribers that automatic healing has occurred.
+    ///     </para>
+    /// </remarks>
+    Task<bool> RepairConfigurationDriftAsync(string sourceName, string expectedUrl, int expectedWidth,
+        int expectedHeight);
 
     /// <summary>
     ///     Gets the name of the currently active scene in OBS.
@@ -220,4 +242,19 @@ public interface IObsController {
     ///     </para>
     /// </remarks>
     event EventHandler? Disconnected;
+
+    /// <summary>
+    ///     Event raised when a new scene is created in OBS (for notification purposes).
+    /// </summary>
+    event EventHandler<string>? SceneCreated;
+
+    /// <summary>
+    ///     Event raised when a new source is created in OBS (for notification purposes).
+    /// </summary>
+    event EventHandler<string>? SourceCreated;
+
+    /// <summary>
+    ///     Event raised when configuration drift is automatically repaired.
+    /// </summary>
+    event EventHandler? ConfigurationDriftRepaired;
 }

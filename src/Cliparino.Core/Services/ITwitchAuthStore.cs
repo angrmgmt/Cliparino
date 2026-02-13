@@ -83,7 +83,7 @@ public interface ITwitchAuthStore {
     ///         <c>expires_in</c> value returned by Twitch (usually 3600 seconds for access tokens).
     ///     </para>
     /// </remarks>
-    Task SaveTokensAsync(string accessToken, string refreshToken, DateTimeOffset expiresAt, string? userId = null);
+    Task SaveTokensAsync(string accessToken, string? refreshToken, DateTimeOffset expiresAt, string? userId = null);
 
     /// <summary>
     ///     Retrieves the timestamp when the access token expires.

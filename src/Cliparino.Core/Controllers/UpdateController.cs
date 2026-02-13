@@ -31,10 +31,8 @@ public class UpdateController : ControllerBase {
     /// <exception cref="ArgumentNullException">
     ///     Thrown when <paramref name="updateChecker" /> or <paramref name="logger" /> is <see langword="null" />.
     /// </exception>
-    public UpdateController(
-        IUpdateChecker updateChecker,
-        ILogger<UpdateController> logger
-    ) {
+    public UpdateController(IUpdateChecker updateChecker,
+        ILogger<UpdateController> logger) {
         _updateChecker = updateChecker ?? throw new ArgumentNullException(nameof(updateChecker));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -55,24 +53,20 @@ public class UpdateController : ControllerBase {
             var updateInfo = await _updateChecker.CheckForUpdatesAsync(cancellationToken);
 
             if (updateInfo == null)
-                return Ok(
-                    new {
-                        currentVersion = _updateChecker.CurrentVersion,
-                        updateAvailable = false,
-                        message = "Could not check for updates"
-                    }
-                );
-
-            return Ok(
-                new {
+                return Ok(new {
                     currentVersion = _updateChecker.CurrentVersion,
-                    latestVersion = updateInfo.LatestVersion,
-                    updateAvailable = updateInfo.IsNewer,
-                    releaseUrl = updateInfo.ReleaseUrl,
-                    publishedAt = updateInfo.PublishedAt,
-                    description = updateInfo.Description
-                }
-            );
+                    updateAvailable = false,
+                    message = "Could not check for updates"
+                });
+
+            return Ok(new {
+                currentVersion = _updateChecker.CurrentVersion,
+                latestVersion = updateInfo.LatestVersion,
+                updateAvailable = updateInfo.IsNewer,
+                releaseUrl = updateInfo.ReleaseUrl,
+                publishedAt = updateInfo.PublishedAt,
+                description = updateInfo.Description
+            });
         } catch (Exception ex) {
             _logger.LogError(ex, "Error checking for updates");
 

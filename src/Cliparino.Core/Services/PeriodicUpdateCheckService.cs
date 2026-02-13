@@ -50,11 +50,9 @@ public class PeriodicUpdateCheckService : BackgroundService {
     /// <param name="updateChecker">The update checker service to use for checking versions.</param>
     /// <param name="configuration">Configuration provider for check interval and startup settings.</param>
     /// <param name="logger">Logger instance for recording check results.</param>
-    public PeriodicUpdateCheckService(
-        IUpdateChecker updateChecker,
+    public PeriodicUpdateCheckService(IUpdateChecker updateChecker,
         IConfiguration configuration,
-        ILogger<PeriodicUpdateCheckService> logger
-    ) {
+        ILogger<PeriodicUpdateCheckService> logger) {
         _updateChecker = updateChecker;
         _configuration = configuration;
         _logger = logger;
@@ -112,13 +110,10 @@ public class PeriodicUpdateCheckService : BackgroundService {
                     "Update available: v{LatestVersion} (current: v{CurrentVersion}). Download: {ReleaseUrl}",
                     updateInfo.LatestVersion,
                     _updateChecker.CurrentVersion,
-                    updateInfo.ReleaseUrl
-                );
+                    updateInfo.ReleaseUrl);
             else
-                _logger.LogDebug(
-                    "No updates available. Current version: v{CurrentVersion}",
-                    _updateChecker.CurrentVersion
-                );
+                _logger.LogDebug("No updates available. Current version: v{CurrentVersion}",
+                    _updateChecker.CurrentVersion);
         } catch (Exception ex) {
             _logger.LogWarning(ex, "Failed to check for updates");
         }

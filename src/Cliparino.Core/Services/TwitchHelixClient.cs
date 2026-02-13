@@ -46,12 +46,10 @@ public class TwitchHelixClient : ITwitchHelixClient {
     private readonly ILogger<TwitchHelixClient> _logger;
     private readonly ITwitchOAuthService _oauthService;
 
-    public TwitchHelixClient(
-        ITwitchOAuthService oauthService,
+    public TwitchHelixClient(ITwitchOAuthService oauthService,
         ILogger<TwitchHelixClient> logger,
         IHttpClientFactory httpClientFactory,
-        IConfiguration configuration
-    ) {
+        IConfiguration configuration) {
         _oauthService = oauthService;
         _logger = logger;
         _httpClient = httpClientFactory.CreateClient("Twitch");
@@ -105,12 +103,10 @@ public class TwitchHelixClient : ITwitchHelixClient {
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<ClipData>> GetClipsByBroadcasterAsync(
-        string broadcasterId,
+    public async Task<IReadOnlyList<ClipData>> GetClipsByBroadcasterAsync(string broadcasterId,
         int count = 20,
         DateTimeOffset? startedAt = null,
-        DateTimeOffset? endedAt = null
-    ) {
+        DateTimeOffset? endedAt = null) {
         if (string.IsNullOrWhiteSpace(broadcasterId)) {
             _logger.LogWarning("GetClipsByBroadcasterAsync called with empty broadcaster ID");
 
@@ -279,26 +275,18 @@ public class TwitchHelixClient : ITwitchHelixClient {
             request.Headers.Add("Client-ID", _clientId);
             request.Headers.Add("Authorization", $"Bearer {accessToken}");
 
-            var payload = new {
-                broadcaster_id = broadcasterId,
-                sender_id = broadcasterId,
-                message
-            };
+            var payload = new { broadcaster_id = broadcasterId, sender_id = broadcasterId, message };
 
-            request.Content = new StringContent(
-                JsonSerializer.Serialize(payload),
+            request.Content = new StringContent(JsonSerializer.Serialize(payload),
                 Encoding.UTF8,
-                "application/json"
-            );
+                "application/json");
 
             var response = await _httpClient.SendAsync(request);
 
             if (!response.IsSuccessStatusCode) {
                 var errorContent = await response.Content.ReadAsStringAsync();
-                _logger.LogError(
-                    "Failed to send chat message. Status: {Status}, Response: {Response}",
-                    response.StatusCode, errorContent
-                );
+                _logger.LogError("Failed to send chat message. Status: {Status}, Response: {Response}",
+                    response.StatusCode, errorContent);
 
                 return false;
             }
@@ -340,25 +328,19 @@ public class TwitchHelixClient : ITwitchHelixClient {
 
             if (!response.IsSuccessStatusCode) {
                 var errorContent = await response.Content.ReadAsStringAsync();
-                _logger.LogWarning(
-                    "Failed to send Twitch shoutout. Status: {Status}, Response: {Response}",
-                    response.StatusCode, errorContent
-                );
+                _logger.LogWarning("Failed to send Twitch shoutout. Status: {Status}, Response: {Response}",
+                    response.StatusCode, errorContent);
 
                 return false;
             }
 
-            _logger.LogInformation(
-                "Twitch shoutout sent successfully from {FromId} to {ToId}",
-                fromBroadcasterId, toBroadcasterId
-            );
+            _logger.LogInformation("Twitch shoutout sent successfully from {FromId} to {ToId}",
+                fromBroadcasterId, toBroadcasterId);
 
             return true;
         } catch (Exception ex) {
-            _logger.LogError(
-                ex, "Failed to send Twitch shoutout from {FromId} to {ToId}",
-                fromBroadcasterId, toBroadcasterId
-            );
+            _logger.LogError(ex, "Failed to send Twitch shoutout from {FromId} to {ToId}",
+                fromBroadcasterId, toBroadcasterId);
 
             return false;
         }
@@ -415,11 +397,16 @@ public class TwitchHelixClient : ITwitchHelixClient {
                     return Array.Empty<ClipData>();
                 }
 
-                return apiResponse.Data.Select(MapToClipData).ToList();
+                var dtos = apiResponse.Data;
+                var gameIds = dtos.Select(d => d.GameId).Where(id => !string.IsNullOrEmpty(id)).Distinct().ToList();
+                var gameNames = gameIds.Count > 0
+                    ? await FetchGameNamesByIdsAsync(gameIds)
+                    : new Dictionary<string, string>();
+
+                return dtos.Select(dto => MapToClipData(dto, gameNames)).ToList();
             } catch (HttpRequestException ex) when (retryCount < maxRetries - 1) {
-                _logger.LogWarning(
-                    ex, "Network error during API call (attempt {Attempt}/{Max})", retryCount + 1, maxRetries
-                );
+                _logger.LogWarning(ex, "Network error during API call (attempt {Attempt}/{Max})", retryCount + 1,
+                    maxRetries);
                 retryCount++;
                 var delay = TimeSpan.FromSeconds(Math.Pow(2, retryCount));
                 await Task.Delay(delay);
@@ -445,20 +432,63 @@ public class TwitchHelixClient : ITwitchHelixClient {
         return url;
     }
 
-    private static ClipData MapToClipData(TwitchClipDto dto) {
-        return new ClipData(
-            dto.Id,
+    private static ClipData MapToClipData(TwitchClipDto dto, Dictionary<string, string> gameNames) {
+        var creator = new UserData(dto.CreatorId, dto.CreatorLogin, dto.CreatorName);
+        var broadcaster = new UserData(dto.BroadcasterId, dto.BroadcasterLogin, dto.BroadcasterName);
+        var gameName = !string.IsNullOrEmpty(dto.GameId) && gameNames.TryGetValue(dto.GameId, out var name)
+            ? name
+            : "Unknown";
+
+        return new ClipData(dto.Id,
             dto.Url,
             dto.Title,
-            dto.CreatorName,
-            dto.BroadcasterName,
-            dto.BroadcasterId,
-            dto.GameName ?? "Unknown",
+            creator,
+            broadcaster,
+            gameName,
             (int)Math.Ceiling(dto.Duration),
             dto.CreatedAt,
             dto.ViewCount,
-            dto.ViewCount >= 100
-        );
+            dto.ViewCount >= 100);
+    }
+
+    private async Task<Dictionary<string, string>> FetchGameNamesByIdsAsync(List<string> ids) {
+        var result = new Dictionary<string, string>();
+
+        if (ids.Count == 0) return result;
+
+        // Build query: up to 100 ids per request
+        var chunks = ids.Chunk(100);
+
+        foreach (var chunk in chunks) {
+            var query = string.Join("&", chunk.Select(id => $"id={Uri.EscapeDataString(id)}"));
+            var url = $"https://api.twitch.tv/helix/games?{query}";
+
+            var accessToken = await _oauthService.GetValidAccessTokenAsync();
+
+            if (string.IsNullOrEmpty(accessToken)) {
+                _logger.LogWarning("No valid access token when fetching game names");
+
+                return result;
+            }
+
+            var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Add("Client-ID", _clientId);
+            request.Headers.Add("Authorization", $"Bearer {accessToken}");
+
+            try {
+                var response = await _httpClient.SendAsync(request);
+                response.EnsureSuccessStatusCode();
+                var content = await response.Content.ReadAsStringAsync();
+                var games = JsonSerializer.Deserialize<TwitchGamesResponse>(content);
+                if (games?.Data != null)
+                    foreach (var g in games.Data)
+                        result[g.Id] = g.Name;
+            } catch (Exception ex) {
+                _logger.LogWarning(ex, "Failed to fetch game names for ids: {Ids}", string.Join(",", chunk));
+            }
+        }
+
+        return result;
     }
 
     private class TwitchClipsResponse(List<TwitchClipDto> data) {
@@ -487,9 +517,12 @@ public class TwitchHelixClient : ITwitchHelixClient {
         string id,
         string url,
         string broadcasterId,
+        string broadcasterLogin,
         string broadcasterName,
+        string creatorId,
+        string creatorLogin,
         string creatorName,
-        string? gameName,
+        string gameId,
         string title,
         int viewCount,
         DateTime createdAt,
@@ -501,11 +534,18 @@ public class TwitchHelixClient : ITwitchHelixClient {
 
         [JsonPropertyName("broadcaster_id")] public string BroadcasterId { get; } = broadcasterId;
 
+        [JsonPropertyName("broadcaster_login")]
+        public string BroadcasterLogin { get; } = broadcasterLogin;
+
         [JsonPropertyName("broadcaster_name")] public string BroadcasterName { get; } = broadcasterName;
+
+        [JsonPropertyName("creator_id")] public string CreatorId { get; } = creatorId;
+
+        [JsonPropertyName("creator_login")] public string CreatorLogin { get; } = creatorLogin;
 
         [JsonPropertyName("creator_name")] public string CreatorName { get; } = creatorName;
 
-        [JsonPropertyName("game_name")] public string? GameName { get; } = gameName;
+        [JsonPropertyName("game_id")] public string GameId { get; } = gameId;
 
         [JsonPropertyName("title")] public string Title { get; } = title;
 
@@ -514,5 +554,14 @@ public class TwitchHelixClient : ITwitchHelixClient {
         [JsonPropertyName("created_at")] public DateTime CreatedAt { get; } = createdAt;
 
         [JsonPropertyName("duration")] public double Duration { get; } = duration;
+    }
+
+    private class TwitchGamesResponse(List<TwitchGameDto> data) {
+        [JsonPropertyName("data")] public List<TwitchGameDto> Data { get; } = data;
+    }
+
+    private class TwitchGameDto(string id, string name) {
+        [JsonPropertyName("id")] public string Id { get; } = id;
+        [JsonPropertyName("name")] public string Name { get; } = name;
     }
 }

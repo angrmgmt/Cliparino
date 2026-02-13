@@ -45,11 +45,9 @@ public partial class DiagnosticsService : IDiagnosticsService {
     /// <param name="configuration">Application configuration provider.</param>
     /// <param name="logger">Logger instance for recording export operations and errors.</param>
     /// <param name="healthReporter">Optional health reporter instance. If null, health status is excluded from exports.</param>
-    public DiagnosticsService(
-        IConfiguration configuration,
+    public DiagnosticsService(IConfiguration configuration,
         ILogger<DiagnosticsService> logger,
-        IHealthReporter? healthReporter = null
-    ) {
+        IHealthReporter? healthReporter = null) {
         _configuration = configuration;
         _logger = logger;
         _healthReporter = healthReporter;
@@ -127,11 +125,7 @@ public partial class DiagnosticsService : IDiagnosticsService {
 
         foreach (var section in _configuration.GetChildren()) configDict[section.Key] = GetRedactedSection(section);
 
-        return JsonSerializer.Serialize(
-            configDict, new JsonSerializerOptions {
-                WriteIndented = true
-            }
-        );
+        return JsonSerializer.Serialize(configDict, new JsonSerializerOptions { WriteIndented = true });
     }
 
     /// <summary>
@@ -161,13 +155,12 @@ public partial class DiagnosticsService : IDiagnosticsService {
     /// <returns>True if the key appears to contain sensitive information.</returns>
     private bool ShouldRedact(string key) {
         var sensitiveKeys = new[] {
-            "password", "secret", "token", "key", "clientid", "clientsecret",
-            "accesstoken", "refreshtoken", "apikey", "connectionstring"
+            "password", "secret", "token", "key", "clientid", "clientsecret", "accesstoken", "refreshtoken", "apikey",
+            "connectionstring"
         };
 
         return sensitiveKeys.Any(sk =>
-            key.Contains(sk, StringComparison.OrdinalIgnoreCase)
-        );
+            key.Contains(sk, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>

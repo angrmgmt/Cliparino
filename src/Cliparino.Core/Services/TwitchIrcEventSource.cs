@@ -33,8 +33,12 @@ public partial class TwitchIrcEventSource(
     private StreamReader? _reader;
 
     private TcpClient? _tcpClient;
-    private string? _username;
     private StreamWriter? _writer;
+
+    /// <summary>
+    ///     Gets the username of the currently authenticated user, or null if not connected.
+    /// </summary>
+    public string? Username { get; private set; }
 
     /// <summary>
     ///     Gets a value indicating whether the IRC client is currently connected.
@@ -64,7 +68,7 @@ public partial class TwitchIrcEventSource(
         if (string.IsNullOrEmpty(token))
             throw new InvalidOperationException("Cannot connect to IRC: No access token available");
 
-        _username = await GetUsernameAsync(token, cancellationToken);
+        Username = await GetUsernameAsync(token, cancellationToken);
 
         _tcpClient = new TcpClient();
         await _tcpClient.ConnectAsync(IrcServer, IrcPort, cancellationToken);
@@ -74,16 +78,16 @@ public partial class TwitchIrcEventSource(
         _writer = new StreamWriter(stream) { AutoFlush = true };
 
         await _writer.WriteLineAsync($"PASS oauth:{token}");
-        await _writer.WriteLineAsync($"NICK {_username}");
+        await _writer.WriteLineAsync($"NICK {Username}");
 
         await _writer.WriteLineAsync("CAP REQ :twitch.tv/tags twitch.tv/commands");
 
-        await _writer.WriteLineAsync($"JOIN #{_username}");
+        await _writer.WriteLineAsync($"JOIN #{Username}");
 
         _connectionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _ = Task.Run(() => ReceiveMessagesAsync(_connectionCts.Token), _connectionCts.Token);
 
-        logger.LogInformation("IRC connected to #{Channel}", _username);
+        logger.LogInformation("IRC connected to #{Channel}", Username);
     }
 
     /// <summary>
@@ -120,8 +124,7 @@ public partial class TwitchIrcEventSource(
 
     /// <inheritdoc />
     public async IAsyncEnumerable<TwitchEvent> StreamEventsAsync(
-        [EnumeratorCancellation] CancellationToken cancellationToken = default
-    ) {
+        [EnumeratorCancellation] CancellationToken cancellationToken = default) {
         await foreach (var evt in _eventChannel.Reader.ReadAllAsync(cancellationToken)) yield return evt;
     }
 
@@ -183,13 +186,10 @@ public partial class TwitchIrcEventSource(
         var badgesStr = tags.GetValueOrDefault("badges", "");
         var channelId = tags.GetValueOrDefault("room-id", "");
 
-        var badges = new HashSet<string>(
-            badgesStr.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                .Select(b => b.Split('/')[0])
-        );
+        var badges = new HashSet<string>(badgesStr.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(b => b.Split('/')[0]));
 
-        var chatMessage = new ChatMessage(
-            username,
+        var chatMessage = new ChatMessage(username,
             displayName,
             channel,
             userId,
@@ -198,8 +198,7 @@ public partial class TwitchIrcEventSource(
             badges.Contains("moderator"),
             badges.Contains("vip"),
             badges.Contains("broadcaster"),
-            badges.Contains("subscriber")
-        );
+            badges.Contains("subscriber"));
 
         _eventChannel.Writer.TryWrite(new ChatMessageEvent(chatMessage));
         logger.LogDebug("IRC chat message from {User}: {Message}", displayName, messageText);
@@ -252,6 +251,31 @@ public partial class TwitchIrcEventSource(
         using var doc = JsonDocument.Parse(json);
 
         return doc.RootElement.GetProperty("login").GetString()!;
+    }
+
+    /// <summary>
+    ///     Sends a chat message to the specified channel.
+    /// </summary>
+    /// <param name="channel">The channel to send the message to (without the # prefix).</param>
+    /// <param name="message">The message to send.</param>
+    /// <returns>True if the message was sent successfully, false otherwise.</returns>
+    public async Task<bool> SendMessageAsync(string channel, string message) {
+        if (_writer == null || !IsConnected) {
+            logger.LogWarning("Cannot send message: IRC not connected");
+
+            return false;
+        }
+
+        try {
+            await _writer.WriteLineAsync($"PRIVMSG #{channel} :{message}");
+            logger.LogDebug("IRC message sent to #{Channel}: {Message}", channel, message);
+
+            return true;
+        } catch (Exception ex) {
+            logger.LogError(ex, "Failed to send IRC message to #{Channel}", channel);
+
+            return false;
+        }
     }
 
     [GeneratedRegex(@":(.+)!.+@.+ PRIVMSG #(\w+) :(.+)")]

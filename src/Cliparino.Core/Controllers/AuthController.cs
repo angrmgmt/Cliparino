@@ -34,7 +34,9 @@ public class AuthController(ITwitchOAuthService oauthService, ILogger<AuthContro
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> Login() {
         try {
+            logger.LogInformation("Starting OAuth flow...");
             var authUrl = await oauthService.StartAuthFlowAsync();
+            logger.LogInformation("OAuth flow started, returning auth URL");
 
             return Ok(new { authUrl });
         } catch (Exception ex) {
@@ -46,86 +48,120 @@ public class AuthController(ITwitchOAuthService oauthService, ILogger<AuthContro
 
     /// <summary>
     ///     OAuth redirect callback endpoint invoked by Twitch after the user approves (or denies) authorization.
+    ///     For implicit flow, the token is in the URL fragment and must be extracted by JavaScript.
     /// </summary>
-    /// <param name="code">Authorization code from Twitch, if the user approved the request.</param>
-    /// <param name="state">Optional state parameter originally generated for CSRF protection.</param>
     /// <param name="error">Optional error string when the user denied the request or Twitch returned an error.</param>
     /// <returns>
     ///     <para>
-    ///         <c>200 OK</c> with a minimal <c>text/html</c> page indicating success or failure when the callback is handled.
+    ///         <c>200 OK</c> with a minimal <c>text/html</c> page that extracts the token from the URL fragment.
     ///     </para>
-    ///     <para><c>400 Bad Request</c> if the callback is missing the authorization code.</para>
-    ///     <para><c>500 Internal Server Error</c> if the OAuth flow cannot be completed.</para>
     /// </returns>
     /// <remarks>
-    ///     This endpoint returns an HTML response so it can be opened directly in a browser window during OAuth.
-    ///     On success, tokens are persisted by <see cref="ITwitchOAuthService" /> (via its configured storage mechanism).
+    ///     This endpoint returns an HTML page with JavaScript that extracts the access_token from the URL fragment
+    ///     and posts it to /auth/complete. This is necessary because URL fragments are not sent to the server.
     /// </remarks>
     [HttpGet("callback")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-    public async Task<IActionResult> Callback(
-        [FromQuery] string? code, [FromQuery] string? state,
-        [FromQuery] string? error
-    ) {
+    public IActionResult Callback([FromQuery] string? error) {
         if (!string.IsNullOrEmpty(error)) {
             logger.LogWarning("OAuth callback received error: {Error}", error);
 
-            return Content(
-                $"""
-
-                                 <!DOCTYPE html>
-                                 <html>
-                                 <head><title>Authentication Failed</title></head>
-                                 <body style='background: #0071c5; color: white; font-family: sans-serif; text-align: center; padding: 50px;'>
-                                     <h1>❌ Authentication Failed</h1>
-                                     <p>Error: {error}</p>
-                                     <p>You can close this window.</p>
-                                 </body>
-                                 </html>
-                 """, "text/html"
-            );
+            return Content($"""
+                            <!DOCTYPE html>
+                            <html>
+                            <head><title>Authentication Failed</title></head>
+                            <body style='background: #0071c5; color: white; font-family: sans-serif; text-align: center; padding: 50px;'>
+                                <h1>❌ Authentication Failed</h1>
+                                <p>Error: {error}</p>
+                                <p>You can close this window.</p>
+                            </body>
+                            </html>
+                            """, "text/html");
         }
 
-        if (string.IsNullOrEmpty(code)) {
-            logger.LogWarning("OAuth callback missing authorization code");
+        return Content("""
+                       <!DOCTYPE html>
+                       <html>
+                       <head><title>Processing Authentication...</title></head>
+                       <body style='background: #0071c5; color: white; font-family: sans-serif; text-align: center; padding: 50px;'>
+                           <h1>🔄 Processing Authentication...</h1>
+                           <p id="status">Completing authentication...</p>
+                           <script>
+                               (async () => {
+                                   try {
+                                       const fragment = window.location.hash.substring(1);
+                                       const params = new URLSearchParams(fragment);
+                                       const accessToken = params.get('access_token');
+                                       const state = params.get('state');
+                                       
+                                       if (!accessToken) {
+                                           document.getElementById('status').innerText = 'Error: No access token received';
+                                           return;
+                                       }
+                                       
+                                       const response = await fetch('/auth/complete', {
+                                           method: 'POST',
+                                           headers: { 'Content-Type': 'application/json' },
+                                           body: JSON.stringify({ accessToken, state })
+                                       });
+                                       
+                                       const result = await response.json();
+                                       
+                                       if (result.success) {
+                                           document.body.innerHTML = `
+                                               <h1>✅ Authentication Successful!</h1>
+                                               <p>You can close this window and return to Cliparino.</p>
+                                           `;
+                                       } else {
+                                           document.body.innerHTML = `
+                                               <h1>❌ Authentication Failed</h1>
+                                               <p>${result.error || 'Unknown error'}</p>
+                                               <p>Please check the application logs for details.</p>
+                                           `;
+                                       }
+                                   } catch (ex) {
+                                       document.body.innerHTML = `
+                                           <h1>❌ Authentication Error</h1>
+                                           <p>An error occurred: ${ex.message}</p>
+                                       `;
+                                   }
+                               })();
+                           </script>
+                       </body>
+                       </html>
+                       """, "text/html");
+    }
 
-            return BadRequest("Missing authorization code");
+    /// <summary>
+    ///     Completes OAuth flow by receiving the access token from the callback page's JavaScript.
+    /// </summary>
+    [HttpPost("complete")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> Complete([FromBody] CompleteAuthRequest request) {
+        logger.LogInformation("Complete auth called with token length: {Length}, state: {State}",
+            request.AccessToken?.Length ?? 0, request.State ?? "none");
+
+        if (string.IsNullOrEmpty(request.AccessToken)) {
+            logger.LogWarning("Complete auth missing access token");
+
+            return Ok(new { success = false, error = "Missing access token" });
+        }
+
+        if (string.IsNullOrEmpty(request.State)) {
+            logger.LogWarning("Complete auth missing state");
+
+            return Ok(new { success = false, error = "Missing state parameter" });
         }
 
         try {
-            var success = await oauthService.CompleteAuthFlowAsync(code);
+            var success = await oauthService.CompleteAuthFlowAsync(request.AccessToken, request.State);
+            logger.LogInformation("CompleteAuthFlowAsync returned: {Success}", success);
 
-            return Content(
-                success
-                    ? """
-
-                                          <!DOCTYPE html>
-                                          <html>
-                                          <head><title>Authentication Successful</title></head>
-                                          <body style='background: #0071c5; color: white; font-family: sans-serif; text-align: center; padding: 50px;'>
-                                              <h1>✅ Authentication Successful!</h1>
-                                              <p>You can close this window and return to Cliparino.</p>
-                                          </body>
-                                          </html>
-                      """
-                    : """
-
-                                          <!DOCTYPE html>
-                                          <html>
-                                          <head><title>Authentication Failed</title></head>
-                                          <body style='background: #0071c5; color: white; font-family: sans-serif; text-align: center; padding: 50px;'>
-                                              <h1>❌ Authentication Failed</h1>
-                                              <p>Unable to complete authentication. Please try again.</p>
-                                          </body>
-                                          </html>
-                      """, "text/html"
-            );
+            return Ok(new { success, error = success ? null : "Authentication failed" });
         } catch (Exception ex) {
             logger.LogError(ex, "Error completing OAuth flow");
 
-            return StatusCode(500, "Authentication failed");
+            return Ok(new { success = false, error = ex.Message });
         }
     }
 
@@ -152,4 +188,6 @@ public class AuthController(ITwitchOAuthService oauthService, ILogger<AuthContro
 
         return Ok(new { message = "Logged out successfully" });
     }
+
+    public record CompleteAuthRequest(string? AccessToken, string? State);
 }

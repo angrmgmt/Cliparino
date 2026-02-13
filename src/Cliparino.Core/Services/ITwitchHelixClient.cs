@@ -82,9 +82,8 @@ public interface ITwitchHelixClient {
     ///         and by <see cref="IShoutoutService" /> to find random clips for shoutouts.
     ///     </para>
     /// </remarks>
-    Task<IReadOnlyList<ClipData>> GetClipsByBroadcasterAsync(
-        string broadcasterId, int count = 20, DateTimeOffset? startedAt = null, DateTimeOffset? endedAt = null
-    );
+    Task<IReadOnlyList<ClipData>> GetClipsByBroadcasterAsync(string broadcasterId, int count = 20,
+        DateTimeOffset? startedAt = null, DateTimeOffset? endedAt = null);
 
     /// <summary>
     ///     Looks up a broadcaster's Twitch user ID by their username.

@@ -78,7 +78,6 @@ public interface IShoutoutService {
     ///         shoutout succeeds but clip playback fails). The return value indicates overall success.
     ///     </para>
     /// </remarks>
-    Task<bool> ExecuteShoutoutAsync(
-        string sourceBroadcasterId, string targetUsername, CancellationToken cancellationToken = default
-    );
+    Task<bool> ExecuteShoutoutAsync(string sourceBroadcasterId, string targetUsername,
+        CancellationToken cancellationToken = default);
 }

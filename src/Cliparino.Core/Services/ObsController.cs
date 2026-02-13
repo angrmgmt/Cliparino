@@ -1,5 +1,6 @@
 using Newtonsoft.Json.Linq;
 using OBSWebsocketDotNet;
+using OBSWebsocketDotNet.Communication;
 
 namespace Cliparino.Core.Services;
 
@@ -36,6 +37,9 @@ public class ObsController : IObsController, IDisposable {
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private readonly ILogger<ObsController> _logger;
     private readonly OBSWebsocket _obs;
+    private bool _disposed;
+    private bool _hasShownSceneCreationNotification;
+    private bool _hasShownSourceCreationNotification;
 
     /// <summary>
     ///     Initializes a new instance of the <see cref="ObsController" /> class.
@@ -57,6 +61,9 @@ public class ObsController : IObsController, IDisposable {
     ///     Disposes the OBS WebSocket connection and releases managed resources.
     /// </summary>
     public void Dispose() {
+        if (_disposed) return;
+        _disposed = true;
+
         _obs.Disconnect();
         _connectionLock.Dispose();
         GC.SuppressFinalize(this);
@@ -71,11 +78,23 @@ public class ObsController : IObsController, IDisposable {
     /// <inheritdoc />
     public event EventHandler? Disconnected;
 
+    public event EventHandler<string>? SceneCreated;
+    public event EventHandler<string>? SourceCreated;
+    public event EventHandler? ConfigurationDriftRepaired;
+
     /// <inheritdoc />
     public async Task<bool> ConnectAsync(string host, int port, string password) {
-        await _connectionLock.WaitAsync();
+        if (_disposed) return false;
 
         try {
+            await _connectionLock.WaitAsync();
+        } catch (ObjectDisposedException) {
+            return false;
+        }
+
+        try {
+            if (_disposed) return false;
+
             if (IsConnected) {
                 _logger.LogWarning("Already connected to OBS");
 
@@ -84,7 +103,16 @@ public class ObsController : IObsController, IDisposable {
 
             _logger.LogInformation("Connecting to OBS at {Host}:{Port}", host, port);
 
-            await Task.Run(() => {
+            var tcs = new TaskCompletionSource<bool>();
+
+            EventHandler onConnected = (_, _) => tcs.TrySetResult(true);
+            EventHandler<ObsDisconnectionInfo> onDisconnected = (_, _) => tcs.TrySetResult(false);
+
+            _obs.Connected += onConnected;
+            _obs.Disconnected += onDisconnected;
+
+            try {
+                await Task.Run(() => {
                     try {
                         _obs.ConnectAsync($"ws://{host}:{port}", password);
                     } catch (Exception ex) {
@@ -92,49 +120,68 @@ public class ObsController : IObsController, IDisposable {
 
                         throw;
                     }
+                });
+
+                // Wait for connection or timeout (5 seconds)
+                var resultTask = await Task.WhenAny(tcs.Task, Task.Delay(5000));
+                var success = resultTask == tcs.Task && await tcs.Task;
+
+                if (success) {
+                    IsConnected = true;
+                    _logger.LogInformation("Successfully connected to OBS");
+
+                    return true;
                 }
-            );
 
-            await Task.Delay(1000);
+                _logger.LogError("Failed to connect to OBS (timeout or rejection)");
 
-            if (_obs.IsConnected) {
-                IsConnected = true;
-                _logger.LogInformation("Successfully connected to OBS");
-
-                return true;
+                return false;
+            } finally {
+                _obs.Connected -= onConnected;
+                _obs.Disconnected -= onDisconnected;
             }
-
-            _logger.LogError("Failed to connect to OBS");
-
-            return false;
         } catch (Exception ex) {
             _logger.LogError(ex, "Error connecting to OBS");
 
             return false;
         } finally {
-            _connectionLock.Release();
+            try {
+                if (!_disposed) _connectionLock.Release();
+            } catch (ObjectDisposedException) {
+                // Ignore disposal during release
+            }
         }
     }
 
     /// <inheritdoc />
     public async Task DisconnectAsync() {
-        await _connectionLock.WaitAsync();
+        if (_disposed) return;
 
         try {
+            await _connectionLock.WaitAsync();
+        } catch (ObjectDisposedException) {
+            return;
+        }
+
+        try {
+            if (_disposed) return;
             if (!IsConnected) return;
 
             _logger.LogInformation("Disconnecting from OBS");
             _obs.Disconnect();
             IsConnected = false;
         } finally {
-            _connectionLock.Release();
+            try {
+                if (!_disposed) _connectionLock.Release();
+            } catch (ObjectDisposedException) {
+                // Ignore disposal during release
+            }
         }
     }
 
     /// <inheritdoc />
-    public async Task EnsureClipSceneAndSourceExistsAsync(
-        string sceneName, string sourceName, string url, int width, int height
-    ) {
+    public async Task EnsureClipSceneAndSourceExistsAsync(string sceneName, string sourceName, string url, int width,
+        int height) {
         if (!IsConnected) {
             _logger.LogWarning("Cannot ensure scene/source exists: Not connected to OBS");
 
@@ -160,16 +207,13 @@ public class ObsController : IObsController, IDisposable {
 
         try {
             await Task.Run(() => {
-                    _logger.LogInformation("Setting browser source '{SourceName}' URL to '{Url}'", sourceName, url);
+                _logger.LogInformation("Setting browser source '{SourceName}' URL to '{Url}'", sourceName, url);
 
-                    var inputSettings = new JObject {
-                        ["url"] = url
-                    };
+                var inputSettings = new JObject { ["url"] = url };
 
-                    _obs.SetInputSettings(sourceName, inputSettings);
-                    _logger.LogInformation("Browser source URL updated successfully");
-                }
-            );
+                _obs.SetInputSettings(sourceName, inputSettings);
+                _logger.LogInformation("Browser source URL updated successfully");
+            });
 
             return true;
         } catch (Exception ex) {
@@ -189,11 +233,10 @@ public class ObsController : IObsController, IDisposable {
 
         try {
             await Task.Run(() => {
-                    _logger.LogInformation("Refreshing browser source '{SourceName}'", sourceName);
-                    _obs.PressInputPropertiesButton(sourceName, "refreshnocache");
-                    _logger.LogInformation("Browser source refreshed successfully");
-                }
-            );
+                _logger.LogInformation("Refreshing browser source '{SourceName}'", sourceName);
+                _obs.PressInputPropertiesButton(sourceName, "refreshnocache");
+                _logger.LogInformation("Browser source refreshed successfully");
+            });
 
             return true;
         } catch (Exception ex) {
@@ -213,25 +256,21 @@ public class ObsController : IObsController, IDisposable {
 
         try {
             await Task.Run(() => {
-                    _logger.LogDebug(
-                        "Setting source '{SourceName}' visibility to {Visible} in scene '{SceneName}'", sourceName,
-                        visible,
-                        sceneName
-                    );
+                _logger.LogDebug("Setting source '{SourceName}' visibility to {Visible} in scene '{SceneName}'",
+                    sourceName,
+                    visible,
+                    sceneName);
 
-                    var sceneItems = _obs.GetSceneItemList(sceneName);
-                    var sceneItem = sceneItems.FirstOrDefault(item => item.SourceName == sourceName);
+                var sceneItems = _obs.GetSceneItemList(sceneName);
+                var sceneItem = sceneItems.FirstOrDefault(item => item.SourceName == sourceName);
 
-                    if (sceneItem != null) {
-                        _obs.SetSceneItemEnabled(sceneName, sceneItem.ItemId, visible);
-                        _logger.LogDebug("Source visibility updated successfully");
-                    } else {
-                        _logger.LogWarning(
-                            "Source '{SourceName}' not found in scene '{SceneName}'", sourceName, sceneName
-                        );
-                    }
+                if (sceneItem != null) {
+                    _obs.SetSceneItemEnabled(sceneName, sceneItem.ItemId, visible);
+                    _logger.LogDebug("Source visibility updated successfully");
+                } else {
+                    _logger.LogWarning("Source '{SourceName}' not found in scene '{SceneName}'", sourceName, sceneName);
                 }
-            );
+            });
 
             return true;
         } catch (Exception ex) {
@@ -242,9 +281,8 @@ public class ObsController : IObsController, IDisposable {
     }
 
     /// <inheritdoc />
-    public async Task<bool> CheckConfigurationDriftAsync(
-        string sceneName, string sourceName, string expectedUrl, int expectedWidth, int expectedHeight
-    ) {
+    public async Task<bool> CheckConfigurationDriftAsync(string sceneName, string sourceName, string expectedUrl,
+        int expectedWidth, int expectedHeight) {
         if (!IsConnected) {
             _logger.LogWarning("Cannot check configuration drift: Not connected to OBS");
 
@@ -253,32 +291,61 @@ public class ObsController : IObsController, IDisposable {
 
         try {
             return await Task.Run(() => {
-                    var settings = _obs.GetInputSettings(sourceName);
+                var settings = _obs.GetInputSettings(sourceName);
 
-                    var actualUrl = settings.Settings["url"]?.ToString() ?? "";
-                    var actualWidth = settings.Settings["width"]?.ToObject<int>() ?? 0;
-                    var actualHeight = settings.Settings["height"]?.ToObject<int>() ?? 0;
+                var actualUrl = settings.Settings["url"]?.ToString() ?? "";
+                var actualWidth = settings.Settings["width"]?.ToObject<int>() ?? 0;
+                var actualHeight = settings.Settings["height"]?.ToObject<int>() ?? 0;
 
-                    var urlDrift = actualUrl != expectedUrl;
-                    var widthDrift = actualWidth != expectedWidth;
-                    var heightDrift = actualHeight != expectedHeight;
+                var urlDrift = actualUrl != expectedUrl;
+                var widthDrift = actualWidth != expectedWidth;
+                var heightDrift = actualHeight != expectedHeight;
 
-                    if (urlDrift || widthDrift || heightDrift) {
-                        _logger.LogWarning(
-                            "Configuration drift detected for source '{SourceName}': URL={UrlDrift}, Width={WidthDrift}, Height={HeightDrift}",
-                            sourceName, urlDrift, widthDrift, heightDrift
-                        );
+                if (urlDrift || widthDrift || heightDrift) {
+                    _logger.LogWarning(
+                        "Configuration drift detected for source '{SourceName}': URL={UrlDrift}, Width={WidthDrift}, Height={HeightDrift}",
+                        sourceName, urlDrift, widthDrift, heightDrift);
 
-                        return true;
-                    }
-
-                    _logger.LogDebug("No configuration drift detected for source '{SourceName}'", sourceName);
-
-                    return false;
+                    return true;
                 }
-            );
+
+                _logger.LogDebug("No configuration drift detected for source '{SourceName}'", sourceName);
+
+                return false;
+            });
         } catch (Exception ex) {
             _logger.LogError(ex, "Failed to check configuration drift");
+
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> RepairConfigurationDriftAsync(string sourceName, string expectedUrl, int expectedWidth,
+        int expectedHeight) {
+        if (!IsConnected) {
+            _logger.LogWarning("Cannot repair configuration drift: Not connected to OBS");
+
+            return false;
+        }
+
+        try {
+            await Task.Run(() => {
+                _logger.LogInformation("Repairing configuration drift for source '{SourceName}'", sourceName);
+
+                var inputSettings = new JObject {
+                    ["url"] = expectedUrl, ["width"] = expectedWidth, ["height"] = expectedHeight
+                };
+
+                _obs.SetInputSettings(sourceName, inputSettings);
+                _logger.LogInformation("Configuration drift repaired for source '{SourceName}'", sourceName);
+            });
+
+            ConfigurationDriftRepaired?.Invoke(this, EventArgs.Empty);
+
+            return true;
+        } catch (Exception ex) {
+            _logger.LogError(ex, "Failed to repair configuration drift");
 
             return false;
         }
@@ -294,12 +361,11 @@ public class ObsController : IObsController, IDisposable {
 
         try {
             return await Task.Run(() => {
-                    var scene = _obs.GetCurrentProgramScene();
-                    _logger.LogDebug("Current scene: {Scene}", scene);
+                var scene = _obs.GetCurrentProgramScene();
+                _logger.LogDebug("Current scene: {Scene}", scene);
 
-                    return scene;
-                }
-            );
+                return scene;
+            });
         } catch (Exception ex) {
             _logger.LogError(ex, "Failed to get current scene");
 
@@ -315,24 +381,28 @@ public class ObsController : IObsController, IDisposable {
     /// <exception cref="Exception">Thrown when scene creation fails</exception>
     private async Task EnsureSceneExistsAsync(string sceneName) {
         await Task.Run(() => {
-                try {
-                    var scenes = _obs.ListScenes();
-                    var sceneExists = scenes.Any(s => s.Name == sceneName);
+            try {
+                var scenes = _obs.ListScenes();
+                var sceneExists = scenes.Any(s => s.Name == sceneName);
 
-                    if (!sceneExists) {
-                        _logger.LogInformation("Creating scene '{SceneName}'", sceneName);
-                        _obs.CreateScene(sceneName);
-                        _logger.LogInformation("Scene '{SceneName}' created successfully", sceneName);
-                    } else {
-                        _logger.LogDebug("Scene '{SceneName}' already exists", sceneName);
+                if (!sceneExists) {
+                    _logger.LogInformation("Creating scene '{SceneName}'", sceneName);
+                    _obs.CreateScene(sceneName);
+                    _logger.LogInformation("Scene '{SceneName}' created successfully", sceneName);
+
+                    if (!_hasShownSceneCreationNotification) {
+                        _hasShownSceneCreationNotification = true;
+                        SceneCreated?.Invoke(this, sceneName);
                     }
-                } catch (Exception ex) {
-                    _logger.LogError(ex, "Failed to ensure scene '{SceneName}' exists", sceneName);
-
-                    throw;
+                } else {
+                    _logger.LogDebug("Scene '{SceneName}' already exists", sceneName);
                 }
+            } catch (Exception ex) {
+                _logger.LogError(ex, "Failed to ensure scene '{SceneName}' exists", sceneName);
+
+                throw;
             }
-        );
+        });
     }
 
     /// <summary>
@@ -351,46 +421,45 @@ public class ObsController : IObsController, IDisposable {
     /// </remarks>
     private async Task EnsureSourceExistsAsync(string sceneName, string sourceName, string url, int width, int height) {
         await Task.Run(() => {
-                try {
-                    var sceneItems = _obs.GetSceneItemList(sceneName);
-                    var sourceExists = sceneItems.Any(item => item.SourceName == sourceName);
+            try {
+                var sceneItems = _obs.GetSceneItemList(sceneName);
+                var sourceExists = sceneItems.Any(item => item.SourceName == sourceName);
 
-                    if (!sourceExists) {
-                        _logger.LogInformation(
-                            "Creating browser source '{SourceName}' in scene '{SceneName}'", sourceName, sceneName
-                        );
+                if (!sourceExists) {
+                    _logger.LogInformation("Creating browser source '{SourceName}' in scene '{SceneName}'", sourceName,
+                        sceneName);
 
-                        var inputSettings = new JObject {
-                            ["url"] = url,
-                            ["width"] = width,
-                            ["height"] = height,
-                            ["fps"] = 60,
-                            ["fps_custom"] = true,
-                            ["reroute_audio"] = true,
-                            ["restart_when_active"] = true,
-                            ["shutdown"] = true,
-                            ["webpage_control_level"] = 2
-                        };
+                    var inputSettings = new JObject {
+                        ["url"] = url,
+                        ["width"] = width,
+                        ["height"] = height,
+                        ["fps"] = 60,
+                        ["fps_custom"] = true,
+                        ["reroute_audio"] = true,
+                        ["restart_when_active"] = false,
+                        ["shutdown"] = false,
+                        ["webpage_control_level"] = 2
+                    };
 
-                        var inputId = _obs.CreateInput(sceneName, sourceName, "browser_source", inputSettings, true);
-                        _logger.LogInformation(
-                            "Browser source '{SourceName}' created with ID {InputId}", sourceName, inputId
-                        );
-                    } else {
-                        _logger.LogDebug(
-                            "Source '{SourceName}' already exists in scene '{SceneName}'", sourceName, sceneName
-                        );
+                    var inputId = _obs.CreateInput(sceneName, sourceName, "browser_source", inputSettings, true);
+                    _logger.LogInformation("Browser source '{SourceName}' created with ID {InputId}", sourceName,
+                        inputId);
+
+                    if (!_hasShownSourceCreationNotification) {
+                        _hasShownSourceCreationNotification = true;
+                        SourceCreated?.Invoke(this, sourceName);
                     }
-                } catch (Exception ex) {
-                    _logger.LogError(
-                        ex, "Failed to ensure source '{SourceName}' exists in scene '{SceneName}'", sourceName,
-                        sceneName
-                    );
-
-                    throw;
+                } else {
+                    _logger.LogDebug("Source '{SourceName}' already exists in scene '{SceneName}'", sourceName,
+                        sceneName);
                 }
+            } catch (Exception ex) {
+                _logger.LogError(ex, "Failed to ensure source '{SourceName}' exists in scene '{SceneName}'", sourceName,
+                    sceneName);
+
+                throw;
             }
-        );
+        });
     }
 
     /// <summary>
@@ -406,33 +475,30 @@ public class ObsController : IObsController, IDisposable {
     /// </remarks>
     private async Task EnsureSourceInCurrentSceneAsync(string sceneName) {
         await Task.Run(() => {
-                try {
-                    var currentScene = _obs.GetCurrentProgramScene();
+            try {
+                var currentScene = _obs.GetCurrentProgramScene();
 
-                    if (currentScene != sceneName) {
-                        var currentSceneItems = _obs.GetSceneItemList(currentScene);
-                        var sceneSourceExists = currentSceneItems.Any(item => item.SourceName == sceneName);
+                if (currentScene != sceneName) {
+                    var currentSceneItems = _obs.GetSceneItemList(currentScene);
+                    var sceneSourceExists = currentSceneItems.Any(item => item.SourceName == sceneName);
 
-                        if (!sceneSourceExists) {
-                            _logger.LogInformation(
-                                "Adding scene '{SceneName}' to current scene '{CurrentScene}'", sceneName, currentScene
-                            );
-                            var sceneItemId = _obs.CreateSceneItem(currentScene, sceneName);
-                            _logger.LogInformation(
-                                "Scene '{SceneName}' added to current scene with ID {SceneItemId}", sceneName,
-                                sceneItemId
-                            );
-                        } else {
-                            _logger.LogDebug("Scene '{SceneName}' already exists in current scene", sceneName);
-                        }
+                    if (!sceneSourceExists) {
+                        _logger.LogInformation("Adding scene '{SceneName}' to current scene '{CurrentScene}'",
+                            sceneName, currentScene);
+                        var sceneItemId = _obs.CreateSceneItem(currentScene, sceneName);
+                        _logger.LogInformation("Scene '{SceneName}' added to current scene with ID {SceneItemId}",
+                            sceneName,
+                            sceneItemId);
+                    } else {
+                        _logger.LogDebug("Scene '{SceneName}' already exists in current scene", sceneName);
                     }
-                } catch (Exception ex) {
-                    _logger.LogError(ex, "Failed to ensure scene exists in current scene");
-
-                    throw;
                 }
+            } catch (Exception ex) {
+                _logger.LogError(ex, "Failed to ensure scene exists in current scene");
+
+                throw;
             }
-        );
+        });
     }
 
     /// <summary>

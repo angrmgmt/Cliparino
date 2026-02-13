@@ -1,4 +1,5 @@
 using Cliparino.Core.Models;
+using Microsoft.Extensions.Options;
 
 namespace Cliparino.Core.Services;
 
@@ -27,27 +28,24 @@ namespace Cliparino.Core.Services;
 ///     </para>
 /// </remarks>
 public class ShoutoutService : IShoutoutService {
-    private readonly IConfiguration _configuration;
     private readonly ITwitchHelixClient _helixClient;
     private readonly ILogger<ShoutoutService> _logger;
     private readonly IPlaybackEngine _playbackEngine;
+    private readonly IOptionsMonitor<ShoutoutOptions> _shoutoutOptions;
 
-    public ShoutoutService(
-        ITwitchHelixClient helixClient,
+    public ShoutoutService(ITwitchHelixClient helixClient,
         IPlaybackEngine playbackEngine,
-        IConfiguration configuration,
-        ILogger<ShoutoutService> logger
-    ) {
+        IOptionsMonitor<ShoutoutOptions> shoutoutOptions,
+        ILogger<ShoutoutService> logger) {
         _helixClient = helixClient;
         _playbackEngine = playbackEngine;
-        _configuration = configuration;
+        _shoutoutOptions = shoutoutOptions;
         _logger = logger;
     }
 
     /// <inheritdoc />
-    public async Task<ClipData?> SelectRandomClipAsync(
-        string broadcasterName, CancellationToken cancellationToken = default
-    ) {
+    public async Task<ClipData?> SelectRandomClipAsync(string broadcasterName,
+        CancellationToken cancellationToken = default) {
         if (string.IsNullOrWhiteSpace(broadcasterName)) {
             _logger.LogWarning("SelectRandomClipAsync called with empty broadcaster name");
 
@@ -62,14 +60,14 @@ public class ShoutoutService : IShoutoutService {
             return null;
         }
 
-        var useFeaturedFirst = _configuration.GetValue("Shoutout:UseFeaturedClipsFirst", true);
-        var maxLengthSeconds = _configuration.GetValue("Shoutout:MaxClipLengthSeconds", 60);
-        var maxAgeDays = _configuration.GetValue("Shoutout:MaxClipAgeDays", 365);
+        var options = _shoutoutOptions.CurrentValue;
+        var useFeaturedFirst = options.UseFeaturedClips;
+        var maxLengthSeconds = options.MaxClipLength;
+        var maxAgeDays = options.MaxClipAge;
 
         _logger.LogInformation(
             "Selecting clip for {BroadcasterName} - FeaturedFirst: {FeaturedFirst}, MaxLength: {MaxLength}s, MaxAge: {MaxAge} days",
-            broadcasterName, useFeaturedFirst, maxLengthSeconds, maxAgeDays
-        );
+            broadcasterName, useFeaturedFirst, maxLengthSeconds, maxAgeDays);
 
         var validPeriods = new[] { 1, 7, 30, 90, 365 };
 
@@ -77,12 +75,10 @@ public class ShoutoutService : IShoutoutService {
             var endDate = DateTimeOffset.UtcNow;
             var startDate = endDate.AddDays(-period);
 
-            var clips = await _helixClient.GetClipsByBroadcasterAsync(
-                broadcasterId,
+            var clips = await _helixClient.GetClipsByBroadcasterAsync(broadcasterId,
                 100,
                 startDate,
-                endDate
-            );
+                endDate);
 
             if (!clips.Any()) {
                 _logger.LogDebug("No clips found for period {Period} days", period);
@@ -97,24 +93,21 @@ public class ShoutoutService : IShoutoutService {
             if (selectedClip != null) {
                 _logger.LogInformation(
                     "Selected clip: '{Title}' ({Duration}s, {ViewCount} views, Featured: {IsFeatured})",
-                    selectedClip.Title, selectedClip.DurationSeconds, selectedClip.ViewCount, selectedClip.IsFeatured
-                );
+                    selectedClip.Title, selectedClip.DurationSeconds, selectedClip.ViewCount, selectedClip.IsFeatured);
 
                 return selectedClip;
             }
         }
 
-        _logger.LogWarning(
-            "No suitable clips found for {BroadcasterName} after checking all time periods", broadcasterName
-        );
+        _logger.LogWarning("No suitable clips found for {BroadcasterName} after checking all time periods",
+            broadcasterName);
 
         return null;
     }
 
     /// <inheritdoc />
-    public async Task<bool> ExecuteShoutoutAsync(
-        string sourceBroadcasterId, string targetUsername, CancellationToken cancellationToken = default
-    ) {
+    public async Task<bool> ExecuteShoutoutAsync(string sourceBroadcasterId, string targetUsername,
+        CancellationToken cancellationToken = default) {
         if (string.IsNullOrWhiteSpace(sourceBroadcasterId) || string.IsNullOrWhiteSpace(targetUsername)) {
             _logger.LogWarning("ExecuteShoutoutAsync called with empty parameters");
 
@@ -131,24 +124,26 @@ public class ShoutoutService : IShoutoutService {
 
         await _playbackEngine.PlayClipAsync(clip, cancellationToken);
 
-        var shoutoutMessage = _configuration.GetValue<string>("Shoutout:Message", "");
+        var options = _shoutoutOptions.CurrentValue;
+        var shoutoutMessage = options.EnableMessage ? options.MessageTemplate : "";
 
         if (!string.IsNullOrWhiteSpace(shoutoutMessage)) {
-            var (gameName, displayName) = await _helixClient.GetChannelInfoAsync(clip.BroadcasterId);
+            var (gameName, _) = await _helixClient.GetChannelInfoAsync(clip.Broadcaster.Id);
 
             var formattedMessage = shoutoutMessage
-                .Replace("{channel}", displayName ?? targetUsername)
-                .Replace("{game}", gameName ?? "Unknown");
+                .Replace("{channel}", clip.Broadcaster.DisplayName)
+                .Replace("{game}", gameName ?? "Unknown")
+                .Replace("{broadcaster}", clip.Broadcaster.DisplayName);
 
             var messageSent = await _helixClient.SendChatMessageAsync(sourceBroadcasterId, formattedMessage);
 
             if (!messageSent) _logger.LogWarning("Failed to send shoutout chat message");
         }
 
-        var sendTwitchShoutout = _configuration.GetValue("Shoutout:SendTwitchShoutout", true);
+        var sendTwitchShoutout = options.SendTwitchShoutout;
 
         if (sendTwitchShoutout) {
-            var shoutoutSent = await _helixClient.SendShoutoutAsync(sourceBroadcasterId, clip.BroadcasterId);
+            var shoutoutSent = await _helixClient.SendShoutoutAsync(sourceBroadcasterId, clip.Broadcaster.Id);
 
             if (!shoutoutSent) _logger.LogWarning("Failed to send Twitch /shoutout command");
         }

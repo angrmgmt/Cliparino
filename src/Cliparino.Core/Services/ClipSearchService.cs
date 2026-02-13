@@ -26,27 +26,22 @@ public class ClipSearchService : IClipSearchService {
     private readonly ITwitchHelixClient _helixClient;
     private readonly ILogger<ClipSearchService> _logger;
 
-    public ClipSearchService(
-        ITwitchHelixClient helixClient,
+    public ClipSearchService(ITwitchHelixClient helixClient,
         IConfiguration configuration,
-        ILogger<ClipSearchService> logger
-    ) {
+        ILogger<ClipSearchService> logger) {
         _helixClient = helixClient;
         _configuration = configuration;
         _logger = logger;
     }
 
     /// <inheritdoc />
-    public async Task<ClipData?> SearchClipAsync(
-        string broadcasterName, string searchTerms, CancellationToken cancellationToken = default
-    ) {
+    public async Task<ClipData?> SearchClipAsync(string broadcasterName, string searchTerms,
+        CancellationToken cancellationToken = default) {
         var matchingClips = await GetMatchingClipsAsync(broadcasterName, searchTerms, 10, cancellationToken);
 
         if (!matchingClips.Any()) {
-            _logger.LogInformation(
-                "No clips found matching search terms: '{SearchTerms}' for @{BroadcasterName}",
-                searchTerms, broadcasterName
-            );
+            _logger.LogInformation("No clips found matching search terms: '{SearchTerms}' for @{BroadcasterName}",
+                searchTerms, broadcasterName);
 
             return null;
         }
@@ -55,12 +50,10 @@ public class ClipSearchService : IClipSearchService {
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<ClipData>> GetMatchingClipsAsync(
-        string broadcasterName,
+    public async Task<IReadOnlyList<ClipData>> GetMatchingClipsAsync(string broadcasterName,
         string searchTerms,
         int maxResults = 10,
-        CancellationToken cancellationToken = default
-    ) {
+        CancellationToken cancellationToken = default) {
         if (string.IsNullOrWhiteSpace(broadcasterName) || string.IsNullOrWhiteSpace(searchTerms)) {
             _logger.LogWarning("GetMatchingClipsAsync called with empty parameters");
 
@@ -79,43 +72,31 @@ public class ClipSearchService : IClipSearchService {
         var startDate = DateTimeOffset.UtcNow.AddDays(-searchWindow);
         var endDate = DateTimeOffset.UtcNow;
 
-        var clips = await _helixClient.GetClipsByBroadcasterAsync(
-            broadcasterId,
+        var clips = await _helixClient.GetClipsByBroadcasterAsync(broadcasterId,
             100,
             startDate,
-            endDate
-        );
+            endDate);
 
         if (!clips.Any()) {
-            _logger.LogDebug(
-                "No clips found for broadcaster {BroadcasterName} in the last {SearchWindow} days",
-                broadcasterName, searchWindow
-            );
+            _logger.LogDebug("No clips found for broadcaster {BroadcasterName} in the last {SearchWindow} days",
+                broadcasterName, searchWindow);
 
             return Array.Empty<ClipData>();
         }
 
-        _logger.LogDebug(
-            "Retrieved {Count} clips for broadcaster {BroadcasterName}, searching for: '{SearchTerms}'",
-            clips.Count, broadcasterName, searchTerms
-        );
+        _logger.LogDebug("Retrieved {Count} clips for broadcaster {BroadcasterName}, searching for: '{SearchTerms}'",
+            clips.Count, broadcasterName, searchTerms);
 
         var scoredClips = clips
-            .Select(clip => new {
-                    Clip = clip,
-                    Score = CalculateFuzzyScore(clip.Title, searchTerms)
-                }
-            )
+            .Select(clip => new { Clip = clip, Score = CalculateFuzzyScore(clip.Title, searchTerms) })
             .Where(x => x.Score > 0)
             .OrderByDescending(x => x.Score)
             .Take(maxResults)
             .Select(x => x.Clip)
             .ToList();
 
-        _logger.LogInformation(
-            "Found {Count} matching clips for search: '{SearchTerms}' on @{BroadcasterName}",
-            scoredClips.Count, searchTerms, broadcasterName
-        );
+        _logger.LogInformation("Found {Count} matching clips for search: '{SearchTerms}' on @{BroadcasterName}",
+            scoredClips.Count, searchTerms, broadcasterName);
 
         return scoredClips;
     }
@@ -182,10 +163,8 @@ public class ClipSearchService : IClipSearchService {
         for (var j = 1; j <= m; j++) {
             var cost = target[j - 1] == source[i - 1] ? 0 : 1;
 
-            d[i, j] = Math.Min(
-                Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1),
-                d[i - 1, j - 1] + cost
-            );
+            d[i, j] = Math.Min(Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1),
+                d[i - 1, j - 1] + cost);
         }
 
         return d[n, m];

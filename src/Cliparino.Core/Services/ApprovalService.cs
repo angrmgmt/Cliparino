@@ -36,11 +36,9 @@ public class ApprovalService : IApprovalService {
 
     private readonly ConcurrentDictionary<string, PendingApproval> _pendingApprovals = new();
 
-    public ApprovalService(
-        ITwitchHelixClient helixClient,
+    public ApprovalService(ITwitchHelixClient helixClient,
         IConfiguration configuration,
-        ILogger<ApprovalService> logger
-    ) {
+        ILogger<ApprovalService> logger) {
         _helixClient = helixClient;
         _configuration = configuration;
         _logger = logger;
@@ -69,12 +67,10 @@ public class ApprovalService : IApprovalService {
     }
 
     /// <inheritdoc />
-    public async Task<bool> RequestApprovalAsync(
-        ChatMessage requester,
+    public async Task<bool> RequestApprovalAsync(ChatMessage requester,
         ClipData clip,
         TimeSpan timeout,
-        CancellationToken cancellationToken = default
-    ) {
+        CancellationToken cancellationToken = default) {
         var approvalId = Guid.NewGuid().ToString("N")[..8];
         var tcs = new TaskCompletionSource<bool>();
 
@@ -96,10 +92,11 @@ public class ApprovalService : IApprovalService {
                 $"Type !approve {approvalId} or !deny {approvalId}";
 
             await _helixClient.SendChatMessageAsync(broadcasterId, message);
-            _logger.LogInformation(
-                "Approval request {ApprovalId} sent for clip '{ClipTitle}' requested by {User}",
-                pending.ApprovalId, clip.Title, requester.DisplayName
-            );
+            _logger.LogInformation("Approval request {ApprovalId} sent for clip '{ClipTitle}' requested by {User}",
+                pending.ApprovalId, clip.Title, requester.DisplayName);
+
+            // Start countdown in background
+            _ = StartCountdownAsync(pending, timeout, cancellationToken);
         }
 
         using var timeoutCts = new CancellationTokenSource(timeout);
@@ -108,9 +105,8 @@ public class ApprovalService : IApprovalService {
         try {
             linkedCts.Token.Register(() => tcs.TrySetCanceled());
             var result = await tcs.Task;
-            _logger.LogInformation(
-                "Approval request {ApprovalId} was {Result}", pending.ApprovalId, result ? "approved" : "denied"
-            );
+            _logger.LogInformation("Approval request {ApprovalId} was {Result}", pending.ApprovalId,
+                result ? "approved" : "denied");
 
             return result;
         } catch (OperationCanceledException) {
@@ -158,12 +154,52 @@ public class ApprovalService : IApprovalService {
         var approved = command == "!approve";
         pending.CompletionSource.TrySetResult(approved);
 
-        _logger.LogInformation(
-            "User {User} {Action} approval request {ApprovalId}",
-            response.DisplayName, approved ? "approved" : "denied", pending.ApprovalId
-        );
+        _logger.LogInformation("User {User} {Action} approval request {ApprovalId}",
+            response.DisplayName, approved ? "approved" : "denied", pending.ApprovalId);
 
         return await Task.FromResult(true);
+    }
+
+    private async Task StartCountdownAsync(PendingApproval pending, TimeSpan timeout,
+        CancellationToken cancellationToken) {
+        var broadcasterId = await _helixClient.GetAuthenticatedUserIdAsync();
+
+        if (string.IsNullOrEmpty(broadcasterId)) return;
+
+        var remaining = timeout;
+        var intervals = new[] { TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(10) };
+
+        foreach (var interval in intervals)
+            if (remaining > interval) {
+                var waitTime = remaining - interval;
+
+                try {
+                    await Task.Delay(waitTime, cancellationToken);
+
+                    if (pending.CompletionSource.Task.IsCompleted) return;
+
+                    remaining = interval;
+
+                    var message = interval.TotalSeconds switch {
+                        30 =>
+                            $"@mod Approve clip search for \"{pending.Clip.Title}\" requested by @{pending.RequestedBy.DisplayName}? (30s remaining)",
+                        10 => $"@mod Approval for @{pending.RequestedBy.DisplayName}'s clip expires in 10 seconds...",
+                        _ => null
+                    };
+
+                    if (message != null) await _helixClient.SendChatMessageAsync(broadcasterId, message);
+                } catch (OperationCanceledException) {
+                    return;
+                }
+            }
+
+        // Wait for final timeout
+        try {
+            await Task.Delay(remaining, cancellationToken);
+            if (!pending.CompletionSource.Task.IsCompleted)
+                await _helixClient.SendChatMessageAsync(broadcasterId,
+                    $"@{pending.RequestedBy.DisplayName} Clip search timed out (no mod approval)");
+        } catch (OperationCanceledException) { }
     }
 
     private bool IsAuthorizedToApprove(ChatMessage message) {

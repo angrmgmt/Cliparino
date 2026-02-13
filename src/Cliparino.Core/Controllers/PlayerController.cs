@@ -1,11 +1,12 @@
 using Cliparino.Core.Models;
 using Cliparino.Core.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace Cliparino.Core.Controllers;
 
 /// <summary>
-///     Exposes a minimal HTTP API for controlling clip playback and querying playback state.
+///     Exposes a minimal HTTP API for controlling clip playback and querying the playback state.
 /// </summary>
 /// <remarks>
 ///     <para>
@@ -30,6 +31,7 @@ public class PlayerController : ControllerBase {
     private readonly ITwitchHelixClient? _helixClient;
     private readonly ILogger<PlayerController> _logger;
     private readonly IPlaybackEngine _playbackEngine;
+    private readonly IOptionsMonitor<PlayerOptions> _playerOptions;
 
     /// <summary>
     ///     Initializes a new instance of the <see cref="PlayerController" /> class.
@@ -37,6 +39,7 @@ public class PlayerController : ControllerBase {
     /// <param name="playbackEngine">Playback engine responsible for state management and clip execution.</param>
     /// <param name="clipQueue">Queue used to track pending clips.</param>
     /// <param name="logger">Logger instance for structured diagnostics.</param>
+    /// <param name="playerOptions">The <see cref="PlayerOptions" /> configuration for the player.</param>
     /// <param name="helixClient">
     ///     Optional Twitch Helix client used to validate clip identifiers and enrich fallback metadata.
     ///     When <see langword="null" />, the API will enqueue clips using best-effort fallback data.
@@ -45,15 +48,15 @@ public class PlayerController : ControllerBase {
     ///     Thrown when <paramref name="playbackEngine" />, <paramref name="clipQueue" />, or <paramref name="logger" /> is
     ///     <see langword="null" />.
     /// </exception>
-    public PlayerController(
-        IPlaybackEngine playbackEngine,
+    public PlayerController(IPlaybackEngine playbackEngine,
         IClipQueue clipQueue,
         ILogger<PlayerController> logger,
-        ITwitchHelixClient? helixClient = null
-    ) {
+        IOptionsMonitor<PlayerOptions> playerOptions,
+        ITwitchHelixClient? helixClient = null) {
         _playbackEngine = playbackEngine ?? throw new ArgumentNullException(nameof(playbackEngine));
         _clipQueue = clipQueue ?? throw new ArgumentNullException(nameof(clipQueue));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _playerOptions = playerOptions ?? throw new ArgumentNullException(nameof(playerOptions));
         _helixClient = helixClient;
     }
 
@@ -64,13 +67,28 @@ public class PlayerController : ControllerBase {
     [HttpGet("status")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public IActionResult GetStatus() {
-        return Ok(
-            new {
-                state = _playbackEngine.CurrentState.ToString(),
-                currentClip = _playbackEngine.CurrentClip,
-                queueSize = _clipQueue.Count
-            }
-        );
+        return Ok(new {
+            state = _playbackEngine.CurrentState.ToString(),
+            currentClip = _playbackEngine.CurrentClip,
+            queueSize = _clipQueue.Count
+        });
+    }
+
+    /// <summary>
+    ///     Returns the current player style settings (colors, font, dimensions) so the browser player can apply them.
+    /// </summary>
+    [HttpGet("settings")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult GetSettings() {
+        var opts = _playerOptions.CurrentValue;
+
+        return Ok(new {
+            width = opts.Width,
+            height = opts.Height,
+            infoTextColor = opts.InfoTextColor,
+            infoBackgroundColor = opts.InfoBackgroundColor,
+            infoFontFamily = opts.InfoFontFamily
+        });
     }
 
     /// <summary>
@@ -128,19 +146,23 @@ public class PlayerController : ControllerBase {
     }
 
     private static ClipData CreateFallbackClipData(PlayClipRequest request) {
-        return new ClipData(
-            request.ClipId,
+        var creator = new UserData("unknown",
+            request.CreatorName?.ToLowerInvariant() ?? "unknown",
+            request.CreatorName ?? "Unknown");
+        var broadcaster = new UserData("unknown",
+            request.BroadcasterName?.ToLowerInvariant() ?? "unknown",
+            request.BroadcasterName ?? "Unknown");
+
+        return new ClipData(request.ClipId,
             $"https://clips.twitch.tv/{request.ClipId}",
             request.Title ?? "Unknown Clip",
-            request.CreatorName ?? "Unknown",
-            request.BroadcasterName ?? "Unknown",
-            "unknown",
+            creator,
+            broadcaster,
             request.GameName ?? "Unknown",
             request.DurationSeconds > 0 ? request.DurationSeconds : 30,
             DateTime.UtcNow,
             0,
-            false
-        );
+            false);
     }
 
     /// <summary>
@@ -149,7 +171,7 @@ public class PlayerController : ControllerBase {
     /// <returns><c>200 OK</c> when the replay request is accepted.</returns>
     /// <remarks>
     ///     The replay behavior is defined by <see cref="IPlaybackEngine.ReplayAsync" /> and may be a no-op if no clip has
-    ///     played yet.
+    ///     played yet.                                                                                                                         
     /// </remarks>
     [HttpPost("replay")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -172,7 +194,7 @@ public class PlayerController : ControllerBase {
     }
 
     /// <summary>
-    ///     Accepts an external content-warning signal (for example from browser automation) and records it in logs.
+    ///     Accepts an external content-warning signal (for example, from browser automation) and records it in logs.
     /// </summary>
     /// <param name="request">Information about how the warning was detected and the relevant timestamp.</param>
     /// <returns>
@@ -185,7 +207,8 @@ public class PlayerController : ControllerBase {
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public IActionResult ContentWarningDetected([FromBody] ContentWarningRequest request) {
-        _logger.LogWarning("Content warning detected via {Method}", request.DetectionMethod);
+        _logger.LogWarning("Content warning detected via {Method} at {Timestamp}", request.DetectionMethod,
+            request.Timestamp);
 
         return Ok(new { obsAutomation = false });
     }

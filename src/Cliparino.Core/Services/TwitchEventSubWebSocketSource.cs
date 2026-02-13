@@ -55,11 +55,9 @@ public class TwitchEventSubWebSocketSource : ITwitchEventSource {
 
     private ClientWebSocket? _webSocket;
 
-    public TwitchEventSubWebSocketSource(
-        ITwitchAuthStore authStore,
+    public TwitchEventSubWebSocketSource(ITwitchAuthStore authStore,
         IConfiguration configuration,
-        ILogger<TwitchEventSubWebSocketSource> logger
-    ) {
+        ILogger<TwitchEventSubWebSocketSource> logger) {
         _authStore = authStore;
         _configuration = configuration;
         _logger = logger;
@@ -87,10 +85,8 @@ public class TwitchEventSubWebSocketSource : ITwitchEventSource {
 
         _logger.LogInformation("Connecting to Twitch EventSub WebSocket...");
 
-        await _webSocket.ConnectAsync(
-            new Uri("wss://eventsub.wss.twitch.tv/ws"),
-            cancellationToken
-        );
+        await _webSocket.ConnectAsync(new Uri("wss://eventsub.wss.twitch.tv/ws"),
+            cancellationToken);
 
         _logger.LogInformation("EventSub WebSocket connected, waiting for welcome message");
 
@@ -119,8 +115,7 @@ public class TwitchEventSubWebSocketSource : ITwitchEventSource {
 
     /// <inheritdoc />
     public async IAsyncEnumerable<TwitchEvent> StreamEventsAsync(
-        [EnumeratorCancellation] CancellationToken cancellationToken = default
-    ) {
+        [EnumeratorCancellation] CancellationToken cancellationToken = default) {
         await foreach (var evt in _eventChannel.Reader.ReadAllAsync(cancellationToken)) yield return evt;
     }
 
@@ -194,6 +189,10 @@ public class TwitchEventSubWebSocketSource : ITwitchEventSource {
             }
         } catch (Exception ex) {
             _logger.LogError(ex, "Error processing EventSub message: {Message}", message);
+
+            // Subscription failures (403 Forbidden) should trigger disconnect and IRC fallback
+            // Rethrow to signal connection failure to the coordinator
+            throw;
         }
     }
 
@@ -233,33 +232,22 @@ public class TwitchEventSubWebSocketSource : ITwitchEventSource {
         return doc.RootElement.GetProperty("data")[0].GetProperty("id").GetString()!;
     }
 
-    private async Task SubscribeToChannelChatMessageAsync(
-        HttpClient httpClient, string userId, CancellationToken cancellationToken
-    ) {
+    private async Task SubscribeToChannelChatMessageAsync(HttpClient httpClient, string userId,
+        CancellationToken cancellationToken) {
         var subscriptionPayload = new {
             type = "channel.chat.message",
             version = "1",
-            condition = new {
-                broadcaster_user_id = userId,
-                user_id = userId
-            },
-            transport = new {
-                method = "websocket",
-                session_id = _sessionId
-            }
+            condition = new { broadcaster_user_id = userId, user_id = userId },
+            transport = new { method = "websocket", session_id = _sessionId }
         };
 
-        var content = new StringContent(
-            JsonSerializer.Serialize(subscriptionPayload),
+        var content = new StringContent(JsonSerializer.Serialize(subscriptionPayload),
             Encoding.UTF8,
-            "application/json"
-        );
+            "application/json");
 
-        var response = await httpClient.PostAsync(
-            "https://api.twitch.tv/helix/eventsub/subscriptions",
+        var response = await httpClient.PostAsync("https://api.twitch.tv/helix/eventsub/subscriptions",
             content,
-            cancellationToken
-        );
+            cancellationToken);
 
         if (!response.IsSuccessStatusCode) {
             var error = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -271,32 +259,22 @@ public class TwitchEventSubWebSocketSource : ITwitchEventSource {
         _logger.LogInformation("Subscribed to channel.chat.message events");
     }
 
-    private async Task SubscribeToChannelRaidAsync(
-        HttpClient httpClient, string userId, CancellationToken cancellationToken
-    ) {
+    private async Task SubscribeToChannelRaidAsync(HttpClient httpClient, string userId,
+        CancellationToken cancellationToken) {
         var subscriptionPayload = new {
             type = "channel.raid",
             version = "1",
-            condition = new {
-                to_broadcaster_user_id = userId
-            },
-            transport = new {
-                method = "websocket",
-                session_id = _sessionId
-            }
+            condition = new { to_broadcaster_user_id = userId },
+            transport = new { method = "websocket", session_id = _sessionId }
         };
 
-        var content = new StringContent(
-            JsonSerializer.Serialize(subscriptionPayload),
+        var content = new StringContent(JsonSerializer.Serialize(subscriptionPayload),
             Encoding.UTF8,
-            "application/json"
-        );
+            "application/json");
 
-        var response = await httpClient.PostAsync(
-            "https://api.twitch.tv/helix/eventsub/subscriptions",
+        var response = await httpClient.PostAsync("https://api.twitch.tv/helix/eventsub/subscriptions",
             content,
-            cancellationToken
-        );
+            cancellationToken);
 
         if (!response.IsSuccessStatusCode) {
             var error = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -348,8 +326,7 @@ public class TwitchEventSubWebSocketSource : ITwitchEventSource {
                 if (setId != null) badges.Add(setId);
             }
 
-        var chatMessage = new ChatMessage(
-            username,
+        var chatMessage = new ChatMessage(username,
             displayName,
             channel,
             userId,
@@ -358,8 +335,7 @@ public class TwitchEventSubWebSocketSource : ITwitchEventSource {
             badges.Contains("moderator"),
             badges.Contains("vip"),
             badges.Contains("broadcaster"),
-            badges.Contains("subscriber")
-        );
+            badges.Contains("subscriber"));
 
         _eventChannel.Writer.TryWrite(new ChatMessageEvent(chatMessage));
         _logger.LogDebug("Chat message from {User}: {Message}", displayName, messageText);

@@ -29,10 +29,8 @@ public class HealthController : ControllerBase {
     /// </param>
     /// <param name="logger">Logger instance for structured diagnostics.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="logger" /> is <see langword="null" />.</exception>
-    public HealthController(
-        IHealthReporter? healthReporter,
-        ILogger<HealthController> logger
-    ) {
+    public HealthController(IHealthReporter? healthReporter,
+        ILogger<HealthController> logger) {
         _healthReporter = healthReporter;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -74,21 +72,17 @@ public class HealthController : ControllerBase {
                     ? ComponentStatus.Degraded
                     : ComponentStatus.Healthy;
 
-            return Ok(
-                new {
-                    status = overallStatus.ToString().ToLowerInvariant(),
-                    timestamp = DateTime.UtcNow,
-                    components = healthStatus.ToDictionary(
-                        kvp => kvp.Key,
-                        kvp => new {
-                            status = kvp.Value.Status.ToString().ToLowerInvariant(),
-                            lastChecked = kvp.Value.LastChecked,
-                            lastError = kvp.Value.LastError,
-                            repairActions = kvp.Value.RepairActions
-                        }
-                    )
-                }
-            );
+            return Ok(new {
+                status = overallStatus.ToString().ToLowerInvariant(),
+                timestamp = DateTime.UtcNow,
+                components = healthStatus.ToDictionary(kvp => kvp.Key,
+                    kvp => new {
+                        status = kvp.Value.Status.ToString().ToLowerInvariant(),
+                        lastChecked = kvp.Value.LastChecked,
+                        lastError = kvp.Value.LastError,
+                        repairActions = kvp.Value.RepairActions
+                    })
+            });
         } catch (Exception ex) {
             _logger.LogError(ex, "Error retrieving health status");
 

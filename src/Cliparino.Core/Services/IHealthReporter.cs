@@ -31,6 +31,12 @@ public interface IHealthReporter {
     Task<Dictionary<string, ComponentHealth>> GetHealthStatusAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    ///     Calculates the aggregate health status of all tracked components.
+    /// </summary>
+    /// <returns>The worst status among all components (Unhealthy > Degraded > Healthy).</returns>
+    ComponentStatus GetAggregateStatus();
+
+    /// <summary>
     ///     Reports the current health status of a component.
     /// </summary>
     /// <remarks>
@@ -44,6 +50,11 @@ public interface IHealthReporter {
     /// <param name="status">The current health status of the component.</param>
     /// <param name="lastError">Optional error message describing why the status is not Healthy. Null if no error.</param>
     void ReportHealth(string componentName, ComponentStatus status, string? lastError = null);
+
+    /// <summary>
+    ///     Occurs when a component's health status changes.
+    /// </summary>
+    event EventHandler<HealthChangedEventArgs>? HealthChanged;
 
     /// <summary>
     ///     Records a self-healing repair action taken by a supervisor service.
@@ -62,6 +73,8 @@ public interface IHealthReporter {
     /// </param>
     void ReportRepairAction(string componentName, string action);
 }
+
+public record HealthChangedEventArgs(string ComponentName, ComponentStatus Status, string? LastError);
 
 /// <summary>
 ///     Represents the complete health snapshot for a single component at a point in time.

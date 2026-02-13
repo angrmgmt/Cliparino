@@ -43,6 +43,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: "startupicon"; Description: "Start {#MyAppName} when Windows starts"; GroupDescription: "Startup:"; Flags: unchecked
+Name: "firewall"; Description: "Allow {#MyAppName} through Windows Firewall"; GroupDescription: "Security:"; Flags: checked
 
 [Files]
 ; Main executable (self-contained)
@@ -75,6 +76,53 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 Type: filesandordirs; Name: "{app}\logs"
 
 [Code]
+// Add Windows Firewall rules for Cliparino
+procedure AddFirewallRules();
+var
+  ResultCode: Integer;
+  AppPath: String;
+begin
+  AppPath := ExpandConstant('{app}\{#MyAppExeName}');
+  
+  // Add inbound rule for HTTPS (port 5290)
+  Exec('powershell.exe', 
+    '-ExecutionPolicy Bypass -Command "New-NetFirewallRule -DisplayName ''Cliparino HTTPS'' -Direction Inbound -Program ''' + AppPath + ''' -Protocol TCP -LocalPort 5290 -Action Allow -Profile Private -ErrorAction SilentlyContinue"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  
+  // Add inbound rule for HTTP (port 5291)
+  Exec('powershell.exe', 
+    '-ExecutionPolicy Bypass -Command "New-NetFirewallRule -DisplayName ''Cliparino HTTP'' -Direction Inbound -Program ''' + AppPath + ''' -Protocol TCP -LocalPort 5291 -Action Allow -Profile Private -ErrorAction SilentlyContinue"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+// Remove Windows Firewall rules for Cliparino
+procedure RemoveFirewallRules();
+var
+  ResultCode: Integer;
+begin
+  // Remove HTTPS rule
+  Exec('powershell.exe', 
+    '-ExecutionPolicy Bypass -Command "Remove-NetFirewallRule -DisplayName ''Cliparino HTTPS'' -ErrorAction SilentlyContinue"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  
+  // Remove HTTP rule
+  Exec('powershell.exe', 
+    '-ExecutionPolicy Bypass -Command "Remove-NetFirewallRule -DisplayName ''Cliparino HTTP'' -ErrorAction SilentlyContinue"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+// Called after installation completes
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+  begin
+    if IsTaskSelected('firewall') then
+    begin
+      AddFirewallRules();
+    end;
+  end;
+end;
+
 // Check if the application is running before uninstall
 function InitializeUninstall(): Boolean;
 var
@@ -91,6 +139,12 @@ end;
 // Ask user about keeping configuration on uninstall
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
+  if CurUninstallStep = usUninstall then
+  begin
+    // Remove firewall rules
+    RemoveFirewallRules();
+  end;
+  
   if CurUninstallStep = usPostUninstall then
   begin
     if MsgBox('Do you want to keep your configuration file (appsettings.json)?', mbConfirmation, MB_YESNO) = IDNO then

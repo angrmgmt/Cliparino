@@ -27,7 +27,7 @@ namespace Cliparino.Core.Services;
 ///     </para>
 ///     <para>
 ///         <strong>Caching:</strong><br />
-///         Tokens are cached in memory after first load to avoid repeated file I/O and decryption.
+///         Tokens are cached in memory after the first load to avoid repeated file I/O and decryption.
 ///         Cache is cleared when tokens are updated or cleared.
 ///     </para>
 ///     <para>
@@ -90,9 +90,8 @@ public class TwitchAuthStore : ITwitchAuthStore {
 
     /// <inheritdoc />
     [SupportedOSPlatform("windows")]
-    public async Task SaveTokensAsync(
-        string accessToken, string refreshToken, DateTimeOffset expiresAt, string? userId = null
-    ) {
+    public async Task SaveTokensAsync(string accessToken, string? refreshToken, DateTimeOffset expiresAt,
+        string? userId = null) {
         try {
             var existingTokens = await LoadTokensAsync();
 
@@ -110,10 +109,8 @@ public class TwitchAuthStore : ITwitchAuthStore {
             await File.WriteAllBytesAsync(_storagePath, encryptedBytes);
             _cachedTokens = tokenData;
 
-            _logger.LogInformation(
-                "Tokens saved securely. Expires at: {ExpiresAt}, UserId: {UserId}",
-                expiresAt, tokenData.UserId ?? "not set"
-            );
+            _logger.LogInformation("Tokens saved securely. Expires at: {ExpiresAt}, UserId: {UserId}",
+                expiresAt, tokenData.UserId ?? "not set");
         } catch (Exception ex) {
             _logger.LogError(ex, "Failed to save tokens");
 
@@ -142,9 +139,15 @@ public class TwitchAuthStore : ITwitchAuthStore {
         if (tokens == null)
             return false;
 
-        return !string.IsNullOrEmpty(tokens.AccessToken)
-               && !string.IsNullOrEmpty(tokens.RefreshToken)
-               && tokens.ExpiresAt > DateTimeOffset.UtcNow.AddMinutes(5);
+        // Access token must exist
+        if (string.IsNullOrEmpty(tokens.AccessToken))
+            return false;
+
+        // Either token is not expired, OR we have a refresh token to get a new one
+        var isNotExpired = tokens.ExpiresAt > DateTimeOffset.UtcNow.AddMinutes(5);
+        var hasRefreshToken = !string.IsNullOrEmpty(tokens.RefreshToken);
+
+        return isNotExpired || hasRefreshToken;
     }
 
     [SupportedOSPlatform("windows")]
@@ -170,9 +173,9 @@ public class TwitchAuthStore : ITwitchAuthStore {
     }
 
     private class TokenData {
-        public string AccessToken { get; set; } = string.Empty;
-        public string RefreshToken { get; set; } = string.Empty;
-        public DateTimeOffset ExpiresAt { get; set; }
-        public string? UserId { get; set; }
+        public string AccessToken { get; init; } = string.Empty;
+        public string? RefreshToken { get; init; } = string.Empty;
+        public DateTimeOffset ExpiresAt { get; init; }
+        public string? UserId { get; init; }
     }
 }

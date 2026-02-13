@@ -214,7 +214,7 @@ Cliparino is configured via `appsettings.json` (located next to the executable).
 
 ## HTTP API
 
-The local web host listens on `http://localhost:5290`.
+The local web host listens on `http://localhost:5291` (HTTP) and `https://localhost:5290` (HTTPS for OAuth).
 
 ### Player endpoints (`/api`)
 
@@ -420,7 +420,7 @@ Contributions are welcome! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelin
 
 Cliparino is licensed under the [LGPL 2.1](./LICENSE).
 
-Copyright (C) 2024 Scott Mongrain - angrmgmt@gmail.com
+Copyright (C) 2024-2026 Scott Mongrain - angrmgmt@gmail.com
 
 ## Acknowledgments
 

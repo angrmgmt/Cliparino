@@ -46,17 +46,15 @@ namespace Cliparino.Core.Services;
 ///         Lifecycle: Registered as a singleton. A single instance exists for the lifetime of the application.
 ///     </para>
 /// </remarks>
-public class CommandRouter : ICommandRouter {
+public partial class CommandRouter : ICommandRouter {
     /// <summary>
     ///     Regex pattern for matching Twitch clip URLs and extracting the clip ID (slug).
     ///     Supports both https://clips.twitch.tv/SlugHere and https://www.twitch.tv/broadcaster/clip/SlugHere formats.
     /// </summary>
-    private static readonly Regex ClipUrlRegex = new(
-        @"(?:https?://)?(?:www\.)?(?:clips\.twitch\.tv/|twitch\.tv/\w+/clip/)([a-zA-Z0-9_-]+)",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
-    );
+    private static readonly Regex ClipUrlRegex = MyRegex();
 
     private readonly IApprovalService _approvalService;
+    private readonly IChatFeedbackService _chatFeedback;
     private readonly IClipSearchService _clipSearchService;
     private readonly IConfiguration _configuration;
     private readonly ITwitchHelixClient _helixClient;
@@ -64,20 +62,20 @@ public class CommandRouter : ICommandRouter {
     private readonly IPlaybackEngine _playbackEngine;
     private readonly IShoutoutService _shoutoutService;
 
-    public CommandRouter(
-        IPlaybackEngine playbackEngine,
+    public CommandRouter(IPlaybackEngine playbackEngine,
         ITwitchHelixClient helixClient,
         IShoutoutService shoutoutService,
         IClipSearchService clipSearchService,
         IApprovalService approvalService,
+        IChatFeedbackService chatFeedback,
         IConfiguration configuration,
-        ILogger<CommandRouter> logger
-    ) {
+        ILogger<CommandRouter> logger) {
         _playbackEngine = playbackEngine;
         _helixClient = helixClient;
         _shoutoutService = shoutoutService;
         _clipSearchService = clipSearchService;
         _approvalService = approvalService;
+        _chatFeedback = chatFeedback;
         _configuration = configuration;
         _logger = logger;
     }
@@ -164,16 +162,15 @@ public class CommandRouter : ICommandRouter {
             var broadcasterName = parts[1].TrimStart('@');
             var searchTerms = string.Join(' ', parts.Skip(2));
 
-            if (string.IsNullOrWhiteSpace(searchTerms))
-                return null;
-
-            return new WatchSearchCommand(message, broadcasterName, searchTerms);
+            return string.IsNullOrWhiteSpace(searchTerms)
+                ? null
+                : new WatchSearchCommand(message, broadcasterName, searchTerms);
         }
 
         return new WatchClipCommand(message, parts[1]);
     }
 
-    private ChatCommand? ParseShoutoutCommand(ChatMessage message, string[] parts) {
+    private static ChatCommand? ParseShoutoutCommand(ChatMessage message, string[] parts) {
         if (parts.Length < 2)
             return null;
 
@@ -183,45 +180,38 @@ public class CommandRouter : ICommandRouter {
     }
 
     private async Task ExecuteWatchClipAsync(WatchClipCommand command, CancellationToken cancellationToken) {
-        _logger.LogInformation(
-            "Executing watch clip command: {ClipId} (requested by {User})",
-            command.ClipIdentifier, command.Source.DisplayName
-        );
+        _logger.LogInformation("Executing watch clip command: {ClipId} (requested by {User})",
+            command.ClipIdentifier, command.Source.DisplayName);
 
-        var clipData = await _helixClient.GetClipByIdAsync(command.ClipIdentifier);
-
-        if (clipData == null) clipData = await _helixClient.GetClipByUrlAsync(command.ClipIdentifier);
+        var clipData = await _helixClient.GetClipByIdAsync(command.ClipIdentifier) ??
+                       await _helixClient.GetClipByUrlAsync(command.ClipIdentifier);
 
         if (clipData == null) {
             _logger.LogWarning("Clip not found: {ClipId}", command.ClipIdentifier);
+            await _chatFeedback.SendClipNotFoundFeedbackAsync(command.Source.DisplayName, command.ClipIdentifier);
 
             return;
         }
 
         await _playbackEngine.PlayClipAsync(clipData, cancellationToken);
-        _logger.LogInformation(
-            "Clip enqueued: {ClipTitle} by {Broadcaster}",
-            clipData.Title, clipData.BroadcasterName
-        );
+        _logger.LogInformation("Clip enqueued: {ClipTitle} by {Broadcaster}",
+            clipData.Title, clipData.Broadcaster.DisplayName);
     }
 
     private async Task ExecuteWatchSearchAsync(WatchSearchCommand command, CancellationToken cancellationToken) {
-        _logger.LogInformation(
-            "Executing watch search command: @{Broadcaster} {SearchTerms} (requested by {User})",
-            command.BroadcasterName, command.SearchTerms, command.Source.DisplayName
-        );
+        _logger.LogInformation("Executing watch search command: @{Broadcaster} {SearchTerms} (requested by {User})",
+            command.BroadcasterName, command.SearchTerms, command.Source.DisplayName);
 
-        var clip = await _clipSearchService.SearchClipAsync(
-            command.BroadcasterName,
+        var clip = await _clipSearchService.SearchClipAsync(command.BroadcasterName,
             command.SearchTerms,
-            cancellationToken
-        );
+            cancellationToken);
 
         if (clip == null) {
-            _logger.LogWarning(
-                "No clips found for search: @{Broadcaster} {SearchTerms}",
-                command.BroadcasterName, command.SearchTerms
-            );
+            _logger.LogWarning("No clips found for search: @{Broadcaster} {SearchTerms}",
+                command.BroadcasterName, command.SearchTerms);
+            await _chatFeedback.SendSearchNoResultsFeedbackAsync(command.Source.DisplayName,
+                command.BroadcasterName,
+                command.SearchTerms);
 
             return;
         }
@@ -229,31 +219,30 @@ public class CommandRouter : ICommandRouter {
         if (_approvalService.IsApprovalRequired(command.Source)) {
             _logger.LogInformation("Approval required for clip search by {User}", command.Source.DisplayName);
 
-            var approvalTimeout = TimeSpan.FromSeconds(
-                _configuration.GetValue("ClipSearch:ApprovalTimeoutSeconds", 30)
-            );
+            await _chatFeedback.SendSearchAwaitingApprovalAsync(command.Source.DisplayName,
+                command.BroadcasterName,
+                command.SearchTerms);
 
-            var approved = await _approvalService.RequestApprovalAsync(
-                command.Source,
+            var approvalTimeout = TimeSpan.FromSeconds(_configuration.GetValue("ClipSearch:ApprovalTimeoutSeconds",
+                30));
+
+            var approved = await _approvalService.RequestApprovalAsync(command.Source,
                 clip,
                 approvalTimeout,
-                cancellationToken
-            );
+                cancellationToken);
 
             if (!approved) {
-                _logger.LogInformation(
-                    "Clip search request denied or timed out for {User}", command.Source.DisplayName
-                );
+                _logger.LogInformation("Clip search request denied or timed out for {User}",
+                    command.Source.DisplayName);
+                await _chatFeedback.SendApprovalTimeoutFeedbackAsync(command.Source.DisplayName);
 
                 return;
             }
         }
 
         await _playbackEngine.PlayClipAsync(clip, cancellationToken);
-        _logger.LogInformation(
-            "Clip enqueued from search: {ClipTitle} by {Broadcaster}",
-            clip.Title, clip.BroadcasterName
-        );
+        _logger.LogInformation("Clip enqueued from search: {ClipTitle} by {Broadcaster}",
+            clip.Title, clip.Broadcaster.DisplayName);
     }
 
     private async Task ExecuteStopAsync(CancellationToken cancellationToken) {
@@ -267,10 +256,8 @@ public class CommandRouter : ICommandRouter {
     }
 
     private async Task ExecuteShoutoutAsync(ShoutoutCommand command, CancellationToken cancellationToken) {
-        _logger.LogInformation(
-            "Executing shoutout command for @{TargetUser} (requested by {User})",
-            command.TargetUsername, command.Source.DisplayName
-        );
+        _logger.LogInformation("Executing shoutout command for @{TargetUser} (requested by {User})",
+            command.TargetUsername, command.Source.DisplayName);
 
         var sourceBroadcasterId = await _helixClient.GetAuthenticatedUserIdAsync();
 
@@ -280,12 +267,17 @@ public class CommandRouter : ICommandRouter {
             return;
         }
 
-        var success = await _shoutoutService.ExecuteShoutoutAsync(
-            sourceBroadcasterId,
+        var success = await _shoutoutService.ExecuteShoutoutAsync(sourceBroadcasterId,
             command.TargetUsername,
-            cancellationToken
-        );
+            cancellationToken);
 
-        if (!success) _logger.LogWarning("Shoutout execution failed for @{TargetUser}", command.TargetUsername);
+        if (!success) {
+            _logger.LogWarning("Shoutout execution failed for @{TargetUser}", command.TargetUsername);
+            await _chatFeedback.SendShoutoutNoClipsFeedbackAsync(command.Source.DisplayName, command.TargetUsername);
+        }
     }
+
+    [GeneratedRegex(@"(?:https?://)?(?:www\.)?(?:clips\.twitch\.tv/|twitch\.tv/\w+/clip/)([a-zA-Z0-9_-]+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled, "en-US")]
+    private static partial Regex MyRegex();
 }

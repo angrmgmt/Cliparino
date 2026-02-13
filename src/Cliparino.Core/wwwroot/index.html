@@ -4,20 +4,30 @@
     <meta charset="utf-8">
     <link href="/index.css" rel="stylesheet" type="text/css">
     <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <link href="/favicon.ico" rel="icon" type="image/x-icon">
     <title>Cliparino</title>
 </head>
 <body>
-<div id="twitch-embed">
+<div id="player-container">
+    <div class="info-top">
+        <div class="line1" id="streamer-game">Loading...</div>
+    </div>
     <div class="iframe-container">
-        <iframe allowfullscreen autoplay="true" controls="false" height="1080" id="clip-iframe" mute="false"
-                preload="auto"
-                src="https://clips.twitch.tv/embed?clip={{clipId}}&autoplay=true&parent=localhost" title="Cliparino"
-                width="1920">
+        <iframe allow="autoplay; fullscreen; encrypted-media; picture-in-picture" id="clip-iframe"
+                src="about:blank" title="Cliparino">
         </iframe>
-        <div class="overlay-text" id="overlay-text">
-            <div class="line1">{{streamerName}} doin' a heckin' {{gameName}} stream</div>
-            <div class="line2">{{clipTitle}}</div>
-            <div class="line3">by {{curatorName}}</div>
+    </div>
+    <div class="info-bottom">
+        <div class="line2" id="clip-title"></div>
+        <div class="line3" id="clip-creator"></div>
+    </div>
+</div>
+<div id="idle-container">
+    <div class="idle-content">
+        <h1>Cliparino</h1>
+        <p>Waiting for clips...</p>
+        <div id="interaction-nudge" style="display:none; margin-top: 20px; font-size: 0.8em; color: #ffb809;">
+            Click here once if audio doesn't play automatically
         </div>
     </div>
 </div>

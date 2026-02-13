@@ -1,3 +1,6 @@
+using Cliparino.Core.Models;
+using Microsoft.Extensions.Options;
+
 namespace Cliparino.Core.Services;
 
 /// <summary>
@@ -38,58 +41,84 @@ namespace Cliparino.Core.Services;
 public class ObsHealthSupervisor : BackgroundService {
     private const int MaxReconnectAttempts = 10;
     private readonly BackoffPolicy _backoffPolicy = BackoffPolicy.Default;
-    private readonly IConfiguration _configuration;
     private readonly IHealthReporter? _healthReporter;
     private readonly ILogger<ObsHealthSupervisor> _logger;
     private readonly IObsController _obsController;
+    private readonly IOptionsMonitor<ObsOptions> _obsOptions;
+    private readonly IOptionsMonitor<PlayerOptions> _playerOptions;
     private int _reconnectAttempts;
+
+    private CancellationTokenSource? _stoppingCts;
 
     /// <summary>
     ///     Initializes a new instance of the <see cref="ObsHealthSupervisor" /> class.
     /// </summary>
     /// <param name="obsController">The OBS controller to supervise</param>
     /// <param name="logger">Logger for diagnostic messages</param>
-    /// <param name="configuration">Configuration containing OBS connection and scene settings</param>
+    /// <param name="obsOptions">OBS configuration options</param>
+    /// <param name="playerOptions">Player configuration options</param>
     /// <param name="healthReporter">Optional health reporter for diagnostics (null in tests)</param>
-    public ObsHealthSupervisor(
-        IObsController obsController,
+    public ObsHealthSupervisor(IObsController obsController,
         ILogger<ObsHealthSupervisor> logger,
-        IConfiguration configuration,
-        IHealthReporter? healthReporter = null
-    ) {
+        IOptionsMonitor<ObsOptions> obsOptions,
+        IOptionsMonitor<PlayerOptions> playerOptions,
+        IHealthReporter? healthReporter = null) {
         _obsController = obsController;
         _logger = logger;
-        _configuration = configuration;
+        _obsOptions = obsOptions;
+        _playerOptions = playerOptions;
         _healthReporter = healthReporter;
 
         _obsController.Disconnected += OnObsDisconnected;
         _obsController.Connected += OnObsConnected;
+
+        // Register for configuration changes to trigger immediate reconnection with new settings
+        _obsOptions.OnChange(OnObsOptionsChanged);
     }
 
     /// <summary>
     ///     Gets the configured OBS scene name for clip playback.
     /// </summary>
-    private string SceneName => _configuration["OBS:SceneName"] ?? "Cliparino";
+    private string SceneName => _obsOptions.CurrentValue.SceneName;
 
     /// <summary>
     ///     Gets the configured browser source name for the clip player.
     /// </summary>
-    private string SourceName => _configuration["OBS:SourceName"] ?? "CliparinoPlayer";
+    private string SourceName => _obsOptions.CurrentValue.SourceName;
 
     /// <summary>
     ///     Gets the URL of the embedded clip player web interface.
     /// </summary>
-    private string PlayerUrl => _configuration["Player:Url"] ?? "http://localhost:5290";
+    private string PlayerUrl => _playerOptions.CurrentValue.Url;
 
     /// <summary>
     ///     Gets the configured browser source width in pixels.
     /// </summary>
-    private int Width => int.Parse(_configuration["OBS:Width"] ?? "1920");
+    private int Width => _obsOptions.CurrentValue.Width;
 
     /// <summary>
     ///     Gets the configured browser source height in pixels.
     /// </summary>
-    private int Height => int.Parse(_configuration["OBS:Height"] ?? "1080");
+    private int Height => _obsOptions.CurrentValue.Height;
+
+    private void OnObsOptionsChanged(ObsOptions newOptions) {
+        if (!_obsController.IsConnected) return;
+
+        _logger.LogInformation("OBS configuration change detected. Triggering immediate reconnection...");
+
+        // Use Task.Run to avoid blocking the Options monitor thread
+        _ = Task.Run(async () => {
+            try {
+                // Give the OS a moment to finish writing the file if needed
+                await Task.Delay(500);
+                await _obsController.DisconnectAsync();
+
+                // OnObsDisconnected will be raised, triggering ReconnectAsync
+            } catch (Exception ex) {
+                _logger.LogError(ex, "Failed to trigger reconnection after options change");
+            }
+        });
+    }
 
     /// <summary>
     ///     Executes the health supervision loop: initial connection, periodic drift checks, and reconnection.
@@ -97,13 +126,16 @@ public class ObsHealthSupervisor : BackgroundService {
     /// <param name="stoppingToken">Cancellation token signaling application shutdown</param>
     /// <returns>A task representing the background service execution</returns>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
+        _stoppingCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var token = _stoppingCts.Token;
+
         _logger.LogInformation("OBS Health Supervisor starting...");
 
-        await InitialConnectionAsync(stoppingToken);
+        await InitialConnectionAsync(token);
 
-        while (!stoppingToken.IsCancellationRequested)
+        while (!token.IsCancellationRequested)
             try {
-                await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+                await Task.Delay(TimeSpan.FromMinutes(1), token);
 
                 if (_obsController.IsConnected) await PerformHealthCheckAsync();
             } catch (OperationCanceledException) {
@@ -125,9 +157,9 @@ public class ObsHealthSupervisor : BackgroundService {
     ///     avoid overwhelming OBS with connection attempts if it's not running.
     /// </remarks>
     private async Task InitialConnectionAsync(CancellationToken stoppingToken) {
-        var host = _configuration["OBS:Host"] ?? "localhost";
-        var port = int.Parse(_configuration["OBS:Port"] ?? "4455");
-        var password = _configuration["OBS:Password"] ?? "";
+        var host = _obsOptions.CurrentValue.Host;
+        var port = _obsOptions.CurrentValue.Port;
+        var password = _obsOptions.CurrentValue.Password;
 
         while (!stoppingToken.IsCancellationRequested && !_obsController.IsConnected)
             try {
@@ -146,14 +178,18 @@ public class ObsHealthSupervisor : BackgroundService {
 
                 _reconnectAttempts++;
                 var delay = _backoffPolicy.CalculateDelay(_reconnectAttempts);
-                _logger.LogWarning(
-                    "Initial OBS connection failed. Retry {Attempt}/{Max} in {Delay:0.0}s",
-                    _reconnectAttempts, MaxReconnectAttempts, delay.TotalSeconds
-                );
+                _logger.LogWarning("Initial OBS connection failed. Retry {Attempt}/{Max} in {Delay:0.0}s",
+                    _reconnectAttempts, MaxReconnectAttempts, delay.TotalSeconds);
 
                 _healthReporter?.ReportHealth("OBS", ComponentStatus.Unhealthy, "Connection failed");
 
                 await Task.Delay(delay, stoppingToken);
+            } catch (OperationCanceledException) {
+                // Ignore cancellation during shutdown
+                break;
+            } catch (ObjectDisposedException) {
+                // Ignore disposal during shutdown
+                break;
             } catch (Exception ex) {
                 _logger.LogError(ex, "Error during initial OBS connection");
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
@@ -172,9 +208,8 @@ public class ObsHealthSupervisor : BackgroundService {
         try {
             _logger.LogDebug("Performing OBS health check...");
 
-            var hasDrift = await _obsController.CheckConfigurationDriftAsync(
-                SceneName, SourceName, PlayerUrl, Width, Height
-            );
+            var hasDrift = await _obsController.CheckConfigurationDriftAsync(SceneName, SourceName, PlayerUrl, Width,
+                Height);
 
             if (hasDrift) {
                 _logger.LogWarning("Configuration drift detected. Attempting repair...");
@@ -203,9 +238,7 @@ public class ObsHealthSupervisor : BackgroundService {
         try {
             _logger.LogInformation("Repairing OBS configuration...");
 
-            await _obsController.EnsureClipSceneAndSourceExistsAsync(
-                SceneName, SourceName, PlayerUrl, Width, Height
-            );
+            await _obsController.EnsureClipSceneAndSourceExistsAsync(SceneName, SourceName, PlayerUrl, Width, Height);
 
             await _obsController.SetBrowserSourceUrlAsync(SceneName, SourceName, PlayerUrl);
 
@@ -232,9 +265,7 @@ public class ObsHealthSupervisor : BackgroundService {
         try {
             _logger.LogInformation("Ensuring OBS scene and source configuration...");
 
-            await _obsController.EnsureClipSceneAndSourceExistsAsync(
-                SceneName, SourceName, PlayerUrl, Width, Height
-            );
+            await _obsController.EnsureClipSceneAndSourceExistsAsync(SceneName, SourceName, PlayerUrl, Width, Height);
 
             _logger.LogInformation("OBS configuration verified");
         } catch (Exception ex) {
@@ -252,10 +283,12 @@ public class ObsHealthSupervisor : BackgroundService {
     ///     Reports unhealthy status to the health reporter.
     /// </remarks>
     private void OnObsDisconnected(object? sender, EventArgs e) {
+        if (_stoppingCts?.IsCancellationRequested == true) return;
+
         _logger.LogWarning("OBS disconnected. Starting reconnection process...");
         _healthReporter?.ReportHealth("OBS", ComponentStatus.Unhealthy, "Connection lost");
         _healthReporter?.ReportRepairAction("OBS", "Reconnection process started");
-        _ = Task.Run(async () => await ReconnectAsync());
+        _ = Task.Run(async () => await ReconnectAsync(_stoppingCts?.Token ?? CancellationToken.None));
     }
 
     /// <summary>
@@ -289,21 +322,27 @@ public class ObsHealthSupervisor : BackgroundService {
     ///         Connected event, which resets the attempt counter and verifies configuration.
     ///     </para>
     /// </remarks>
-    private async Task ReconnectAsync() {
-        var host = _configuration["OBS:Host"] ?? "localhost";
-        var port = int.Parse(_configuration["OBS:Port"] ?? "4455");
-        var password = _configuration["OBS:Password"] ?? "";
+    private async Task ReconnectAsync(CancellationToken cancellationToken) {
+        _logger.LogInformation("Starting reconnection loop to OBS...");
 
-        while (_reconnectAttempts < MaxReconnectAttempts && !_obsController.IsConnected) {
+        while (!cancellationToken.IsCancellationRequested && _reconnectAttempts < MaxReconnectAttempts &&
+               !_obsController.IsConnected) {
             _reconnectAttempts++;
             var delay = _backoffPolicy.CalculateDelay(_reconnectAttempts);
 
-            _logger.LogInformation(
-                "Reconnection attempt {Attempt}/{Max} in {Delay:0.0}s",
-                _reconnectAttempts, MaxReconnectAttempts, delay.TotalSeconds
-            );
+            // Re-read options inside the loop to catch any updates from IOptionsMonitor
+            var host = _obsOptions.CurrentValue.Host;
+            var port = _obsOptions.CurrentValue.Port;
+            var password = _obsOptions.CurrentValue.Password;
 
-            await Task.Delay(delay);
+            _logger.LogInformation("Reconnection attempt {Attempt}/{Max} to {Host}:{Port} in {Delay:0.0}s",
+                _reconnectAttempts, MaxReconnectAttempts, host, port, delay.TotalSeconds);
+
+            try {
+                await Task.Delay(delay, cancellationToken);
+            } catch (OperationCanceledException) {
+                break;
+            }
 
             try {
                 var connected = await _obsController.ConnectAsync(host, port, password);
@@ -315,12 +354,15 @@ public class ObsHealthSupervisor : BackgroundService {
 
                     return;
                 }
+            } catch (ObjectDisposedException) {
+                // Ignore disposal during shutdown
+                break;
             } catch (Exception ex) {
                 _logger.LogError(ex, "Reconnection attempt failed");
             }
         }
 
-        if (_reconnectAttempts >= MaxReconnectAttempts) {
+        if (_reconnectAttempts >= MaxReconnectAttempts && !cancellationToken.IsCancellationRequested) {
             _logger.LogError("Max reconnection attempts reached. Stopping reconnection attempts.");
             _healthReporter?.ReportHealth("OBS", ComponentStatus.Unhealthy, "Max reconnection attempts reached");
         }

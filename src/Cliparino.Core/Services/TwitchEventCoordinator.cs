@@ -55,13 +55,11 @@ public class TwitchEventCoordinator : BackgroundService {
     /// <param name="commandRouter">The command router for event processing.</param>
     /// <param name="logger">The logger instance.</param>
     /// <param name="healthReporter">The health reporter instance.</param>
-    public TwitchEventCoordinator(
-        TwitchEventSubWebSocketSource eventSubSource,
+    public TwitchEventCoordinator(TwitchEventSubWebSocketSource eventSubSource,
         TwitchIrcEventSource ircSource,
         ICommandRouter commandRouter,
         ILogger<TwitchEventCoordinator> logger,
-        IHealthReporter? healthReporter = null
-    ) {
+        IHealthReporter? healthReporter = null) {
         _eventSubSource = eventSubSource;
         _ircSource = ircSource;
         _commandRouter = commandRouter;
@@ -84,13 +82,13 @@ public class TwitchEventCoordinator : BackgroundService {
                 if (_activeSource != null) await ProcessEventsAsync(_activeSource, stoppingToken);
             } catch (Exception ex) when (ex is not OperationCanceledException) {
                 _logger.LogError(ex, "Error in event coordinator, will retry with fallback");
-                _healthReporter?.ReportHealth("Twitch", ComponentStatus.Degraded, $"Error: {ex.Message}");
+                _healthReporter?.ReportHealth("TwitchEvents", ComponentStatus.Degraded, $"Error: {ex.Message}");
 
                 if (_activeSource != null) await _activeSource.DisconnectAsync(stoppingToken);
 
                 if (_useEventSub) {
                     _logger.LogWarning("EventSub failed, falling back to IRC");
-                    _healthReporter?.ReportRepairAction("Twitch", "Falling back to IRC");
+                    _healthReporter?.ReportRepairAction("TwitchEvents", "Falling back to IRC");
                     _useEventSub = false;
                 }
 
@@ -103,7 +101,7 @@ public class TwitchEventCoordinator : BackgroundService {
 
         _logger.LogInformation("Twitch Event Coordinator stopping...");
 
-        if (_activeSource != null) await _activeSource.DisconnectAsync(CancellationToken.None);
+        if (_activeSource != null) await _activeSource.DisconnectAsync(stoppingToken);
     }
 
     private async Task ConnectToEventSourceAsync(CancellationToken cancellationToken) {
@@ -114,13 +112,14 @@ public class TwitchEventCoordinator : BackgroundService {
                 _activeSource = _eventSubSource;
                 _reconnectAttempts = 0;
                 _logger.LogInformation("EventSub connection established successfully");
-                _healthReporter?.ReportHealth("Twitch", ComponentStatus.Healthy);
-                _healthReporter?.ReportRepairAction("Twitch", "EventSub connection established");
+                _healthReporter?.ReportHealth("TwitchEvents", ComponentStatus.Healthy);
+                _healthReporter?.ReportRepairAction("TwitchEvents", "EventSub connection established");
 
                 return;
             } catch (Exception ex) {
                 _logger.LogWarning(ex, "EventSub connection failed, falling back to IRC");
-                _healthReporter?.ReportHealth("Twitch", ComponentStatus.Degraded, "EventSub unavailable, using IRC");
+                _healthReporter?.ReportHealth("TwitchEvents", ComponentStatus.Degraded,
+                    "EventSub unavailable, using IRC");
                 _useEventSub = false;
             }
 
@@ -129,8 +128,8 @@ public class TwitchEventCoordinator : BackgroundService {
         _activeSource = _ircSource;
         _reconnectAttempts = 0;
         _logger.LogInformation("IRC connection established successfully");
-        _healthReporter?.ReportHealth("Twitch", ComponentStatus.Degraded, "Using IRC fallback");
-        _healthReporter?.ReportRepairAction("Twitch", "IRC fallback connection established");
+        _healthReporter?.ReportHealth("TwitchEvents", ComponentStatus.Degraded, "Using IRC fallback");
+        _healthReporter?.ReportRepairAction("TwitchEvents", "IRC fallback connection established");
     }
 
     private async Task ProcessEventsAsync(ITwitchEventSource source, CancellationToken cancellationToken) {
@@ -170,10 +169,8 @@ public class TwitchEventCoordinator : BackgroundService {
     private async Task HandleRaidAsync(RaidEvent raidEvent, CancellationToken cancellationToken) {
         cancellationToken.ThrowIfCancellationRequested();
 
-        _logger.LogInformation(
-            "Raid detected from {Raider} with {Viewers} viewers",
-            raidEvent.RaiderUsername, raidEvent.ViewerCount
-        );
+        _logger.LogInformation("Raid detected from {Raider} with {Viewers} viewers",
+            raidEvent.RaiderUsername, raidEvent.ViewerCount);
 
         await Task.CompletedTask;
     }

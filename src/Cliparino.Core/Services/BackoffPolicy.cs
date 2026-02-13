@@ -22,11 +22,9 @@ public class BackoffPolicy {
     /// <param name="baseDelaySeconds">The initial delay for the first attempt in seconds.</param>
     /// <param name="maxDelaySeconds">The maximum allowed delay in seconds.</param>
     /// <param name="jitterFactor">The percentage of jitter to apply (0.0 to 1.0).</param>
-    public BackoffPolicy(
-        int baseDelaySeconds = 2,
+    public BackoffPolicy(int baseDelaySeconds = 2,
         int maxDelaySeconds = 300,
-        double jitterFactor = 0.3
-    ) {
+        double jitterFactor = 0.3) {
         _baseDelaySeconds = baseDelaySeconds;
         _maxDelaySeconds = maxDelaySeconds;
         _jitterFactor = jitterFactor;
@@ -53,10 +51,8 @@ public class BackoffPolicy {
     /// <param name="attemptNumber">The number of consecutive failed attempts.</param>
     /// <returns>A <see cref="TimeSpan" /> representing the calculated delay.</returns>
     public TimeSpan CalculateDelay(int attemptNumber) {
-        var exponentialDelay = Math.Min(
-            _baseDelaySeconds * Math.Pow(2, attemptNumber),
-            _maxDelaySeconds
-        );
+        var exponentialDelay = Math.Min(_baseDelaySeconds * Math.Pow(2, attemptNumber),
+            _maxDelaySeconds);
 
         var jitterRange = exponentialDelay * _jitterFactor;
         var jitter = (Random.Shared.NextDouble() * 2 - 1) * jitterRange;

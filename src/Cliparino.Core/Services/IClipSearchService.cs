@@ -42,9 +42,8 @@ public interface IClipSearchService {
     ///     calculates similarity scores for each clip title, and returns the highest-scoring match.
     ///     Results are cached to reduce API calls for repeated searches.
     /// </remarks>
-    Task<ClipData?> SearchClipAsync(
-        string broadcasterName, string searchTerms, CancellationToken cancellationToken = default
-    );
+    Task<ClipData?> SearchClipAsync(string broadcasterName, string searchTerms,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     ///     Searches for multiple matching clips from a broadcaster's channel, ranked by relevance.
@@ -61,7 +60,6 @@ public interface IClipSearchService {
     ///     This method is useful for presenting multiple options to the user or for diagnostic purposes.
     ///     The current implementation primarily uses <see cref="SearchClipAsync" /> for single-result workflows.
     /// </remarks>
-    Task<IReadOnlyList<ClipData>> GetMatchingClipsAsync(
-        string broadcasterName, string searchTerms, int maxResults = 10, CancellationToken cancellationToken = default
-    );
+    Task<IReadOnlyList<ClipData>> GetMatchingClipsAsync(string broadcasterName, string searchTerms, int maxResults = 10,
+        CancellationToken cancellationToken = default);
 }

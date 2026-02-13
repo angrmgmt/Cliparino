@@ -50,11 +50,9 @@ public class UpdateChecker : IUpdateChecker {
     /// <param name="httpClientFactory">Factory for creating HTTP clients with configured proxy and headers.</param>
     /// <param name="configuration">Configuration provider for reading update settings.</param>
     /// <param name="logger">Logger instance for recording check results and errors.</param>
-    public UpdateChecker(
-        IHttpClientFactory httpClientFactory,
+    public UpdateChecker(IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
-        ILogger<UpdateChecker> logger
-    ) {
+        ILogger<UpdateChecker> logger) {
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
         _logger = logger;
@@ -100,18 +98,14 @@ public class UpdateChecker : IUpdateChecker {
             var latestVersion = tagName.TrimStart('v');
             var isNewer = IsVersionNewer(latestVersion, CurrentVersion);
 
-            _logger.LogInformation(
-                "Update check: Current={Current}, Latest={Latest}, IsNewer={IsNewer}",
-                CurrentVersion, latestVersion, isNewer
-            );
+            _logger.LogInformation("Update check: Current={Current}, Latest={Latest}, IsNewer={IsNewer}",
+                CurrentVersion, latestVersion, isNewer);
 
-            return new UpdateInfo(
-                latestVersion,
+            return new UpdateInfo(latestVersion,
                 htmlUrl,
                 description,
                 publishedAt,
-                isNewer
-            );
+                isNewer);
         } catch (Exception ex) {
             _logger.LogError(ex, "Error checking for updates");
 
@@ -138,10 +132,8 @@ public class UpdateChecker : IUpdateChecker {
 
             return latest > current;
         } catch {
-            _logger.LogWarning(
-                "Could not parse versions: Latest={Latest}, Current={Current}",
-                latestVersion, currentVersion
-            );
+            _logger.LogWarning("Could not parse versions: Latest={Latest}, Current={Current}",
+                latestVersion, currentVersion);
 
             return false;
         }

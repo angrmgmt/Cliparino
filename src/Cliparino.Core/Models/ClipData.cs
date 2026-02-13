@@ -21,9 +21,8 @@ namespace Cliparino.Core.Models;
 /// <param name="Id">The unique Twitch clip identifier (slug)</param>
 /// <param name="Url">The full URL to the clip on Twitch.tv</param>
 /// <param name="Title">The clip title as set by the clip creator</param>
-/// <param name="CreatorName">The username of the person who created the clip</param>
-/// <param name="BroadcasterName">The username of the channel where the clip originated</param>
-/// <param name="BroadcasterId">The unique Twitch user ID of the broadcaster</param>
+/// <param name="Creator">The user who created the clip</param>
+/// <param name="Broadcaster">The broadcaster whose channel the clip is from</param>
 /// <param name="GameName">The name of the game/category being played when the clip was created</param>
 /// <param name="DurationSeconds">The duration of the clip in seconds (typically 5-60 seconds)</param>
 /// <param name="CreatedAt">The UTC timestamp when the clip was created</param>
@@ -33,9 +32,8 @@ public record ClipData(
     string Id,
     string Url,
     string Title,
-    string CreatorName,
-    string BroadcasterName,
-    string BroadcasterId,
+    UserData Creator,
+    UserData Broadcaster,
     string GameName,
     int DurationSeconds,
     DateTime CreatedAt,

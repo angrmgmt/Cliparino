@@ -1,6 +1,35 @@
 namespace Cliparino.Core.Services;
 
 /// <summary>
+///     Event arguments for OAuth authentication completion.
+/// </summary>
+public class OAuthCompletedEventArgs : EventArgs {
+    /// <summary>
+    ///     Initializes a new instance of the <see cref="OAuthCompletedEventArgs" /> class.
+    /// </summary>
+    public OAuthCompletedEventArgs(bool success, string? username = null, string? errorMessage = null) {
+        Success = success;
+        Username = username;
+        ErrorMessage = errorMessage;
+    }
+
+    /// <summary>
+    ///     Gets whether authentication was successful.
+    /// </summary>
+    public bool Success { get; }
+
+    /// <summary>
+    ///     Gets the authenticated username (null if authentication failed).
+    /// </summary>
+    public string? Username { get; }
+
+    /// <summary>
+    ///     Gets the error message if authentication failed (null if successful).
+    /// </summary>
+    public string? ErrorMessage { get; }
+}
+
+/// <summary>
 ///     Defines the contract for managing Twitch OAuth 2.0 authentication flow and token lifecycle.
 /// </summary>
 /// <remarks>
@@ -36,6 +65,11 @@ namespace Cliparino.Core.Services;
 /// </remarks>
 public interface ITwitchOAuthService {
     /// <summary>
+    ///     Raised when OAuth authentication completes (successfully or with failure).
+    /// </summary>
+    event EventHandler<OAuthCompletedEventArgs>? AuthenticationCompleted;
+
+    /// <summary>
     ///     Checks if the user is currently authenticated with valid Twitch tokens.
     /// </summary>
     /// <returns>
@@ -69,7 +103,6 @@ public interface ITwitchOAuthService {
     ///         - <c>chat:read</c> - Read chat messages
     ///         - <c>chat:edit</c> - Send chat messages
     ///         - <c>moderator:manage:shoutouts</c> - Send shoutouts
-    ///         - <c>clips:read</c> - Read clip data
     ///     </para>
     ///     <para>
     ///         After the user authorizes, Twitch redirects to the configured redirect URI with an
@@ -82,6 +115,7 @@ public interface ITwitchOAuthService {
     ///     Completes the OAuth flow by exchanging an authorization code for access and refresh tokens.
     /// </summary>
     /// <param name="authCode">The authorization code received from Twitch's redirect</param>
+    /// <param name="state">The state parameter for CSRF protection and flow tracking</param>
     /// <returns>
     ///     A task containing true if the token exchange succeeded and tokens were saved,
     ///     or false if the exchange failed (invalid code, network error, etc.).
@@ -102,9 +136,10 @@ public interface ITwitchOAuthService {
     ///         - PKCE challenge/verifier mismatch
     ///         - Network errors
     ///         - Invalid client ID or secret
+    ///         - State parameter mismatch
     ///     </para>
     /// </remarks>
-    Task<bool> CompleteAuthFlowAsync(string authCode);
+    Task<bool> CompleteAuthFlowAsync(string? authCode, string? state);
 
     /// <summary>
     ///     Refreshes the access token using the stored refresh token.
