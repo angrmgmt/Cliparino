@@ -30,10 +30,21 @@ namespace Cliparino.Core.Services;
 ///         </item>
 ///     </list>
 ///     <para>
-///         Thread-safety: Implemented as a <see cref="BackgroundService" />, processing events in a single-threaded loop
-///         per source.
+///         <strong>Thread-Safety Model:</strong> This service is inherently thread-safe due to its implementation as a
+///         <see cref="BackgroundService" />. The <see cref="ExecuteAsync" /> method runs on a dedicated background thread,
+///         and all mutable states (<c>_activeSource</c>, <c>_reconnectAttempts</c>, <c>_useEventSub</c>) is accessed
+///         exclusively within this single-threaded execution context. Event processing is sequential—events are handled
+///         one at a time via <c>await foreach</c>, preventing concurrent state modifications. No explicit locking is
+///         required as the framework guarantees single-threaded execution.
 ///     </para>
-///     <para>Lifecycle: Singleton hosted service.</para>
+///     <para>
+///         <strong>Reconnection Policy:</strong> Uses <see cref="BackoffPolicy.Default" /> for exponential backoff.
+///         The backoff delay increases with each failed reconnection attempt and resets to zero upon successful
+///         connection.
+///         This prevents overwhelming Twitch servers during connectivity issues while ensuring timely reconnection when
+///         service is restored.
+///     </para>
+///     <para>Lifecycle: Singleton/hosted service.</para>
 /// </remarks>
 public class TwitchEventCoordinator : BackgroundService {
     private readonly BackoffPolicy _backoffPolicy = BackoffPolicy.Default;
@@ -84,7 +95,7 @@ public class TwitchEventCoordinator : BackgroundService {
                 _logger.LogError(ex, "Error in event coordinator, will retry with fallback");
                 _healthReporter?.ReportHealth("TwitchEvents", ComponentStatus.Degraded, $"Error: {ex.Message}");
 
-                if (_activeSource != null) await _activeSource.DisconnectAsync(stoppingToken);
+                await (_activeSource?.DisconnectAsync(stoppingToken) ?? Task.CompletedTask);
 
                 if (_useEventSub) {
                     _logger.LogWarning("EventSub failed, falling back to IRC");
@@ -101,7 +112,7 @@ public class TwitchEventCoordinator : BackgroundService {
 
         _logger.LogInformation("Twitch Event Coordinator stopping...");
 
-        if (_activeSource != null) await _activeSource.DisconnectAsync(stoppingToken);
+        await (_activeSource?.DisconnectAsync(stoppingToken) ?? Task.CompletedTask);
     }
 
     private async Task ConnectToEventSourceAsync(CancellationToken cancellationToken) {
