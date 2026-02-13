@@ -43,7 +43,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: "startupicon"; Description: "Start {#MyAppName} when Windows starts"; GroupDescription: "Startup:"; Flags: unchecked
-Name: "firewall"; Description: "Allow {#MyAppName} through Windows Firewall"; GroupDescription: "Security:"; Flags: checked
+Name: "firewall"; Description: "Allow {#MyAppName} through Windows Firewall"; GroupDescription: "Security:"
 
 [Files]
 ; Main executable (self-contained)
