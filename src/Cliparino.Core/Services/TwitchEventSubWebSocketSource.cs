@@ -49,6 +49,7 @@ public class TwitchEventSubWebSocketSource : ITwitchEventSource {
     private readonly ITwitchAuthStore _authStore;
     private readonly IConfiguration _configuration;
     private readonly Channel<TwitchEvent> _eventChannel;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<TwitchEventSubWebSocketSource> _logger;
     private CancellationTokenSource? _connectionCts;
     private string? _sessionId;
@@ -57,9 +58,11 @@ public class TwitchEventSubWebSocketSource : ITwitchEventSource {
 
     public TwitchEventSubWebSocketSource(ITwitchAuthStore authStore,
         IConfiguration configuration,
+        IHttpClientFactory httpClientFactory,
         ILogger<TwitchEventSubWebSocketSource> logger) {
         _authStore = authStore;
         _configuration = configuration;
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
         _eventChannel = Channel.CreateUnbounded<TwitchEvent>();
     }
@@ -210,7 +213,7 @@ public class TwitchEventSubWebSocketSource : ITwitchEventSource {
         var token = await _authStore.GetAccessTokenAsync();
         var clientId = _configuration["Twitch:ClientId"];
 
-        using var httpClient = new HttpClient();
+        using var httpClient = _httpClientFactory.CreateClient("Twitch");
         httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
         httpClient.DefaultRequestHeaders.Add("Client-Id", clientId);
 

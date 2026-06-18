@@ -24,6 +24,7 @@ namespace Cliparino.Core.Services;
 /// </remarks>
 public partial class TwitchIrcEventSource(
     ITwitchAuthStore authStore,
+    IHttpClientFactory httpClientFactory,
     ILogger<TwitchIrcEventSource> logger)
     : ITwitchEventSource {
     private const string IrcServer = "irc.chat.twitch.tv";
@@ -240,8 +241,8 @@ public partial class TwitchIrcEventSource(
         return tags;
     }
 
-    private static async Task<string> GetUsernameAsync(string token, CancellationToken cancellationToken) {
-        using var httpClient = new HttpClient();
+    private async Task<string> GetUsernameAsync(string token, CancellationToken cancellationToken) {
+        using var httpClient = httpClientFactory.CreateClient("Twitch");
         httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
 
         var response = await httpClient.GetAsync("https://id.twitch.tv/oauth2/validate", cancellationToken);

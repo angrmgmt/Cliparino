@@ -489,7 +489,8 @@ public sealed class WelcomeWizard : Form {
         button.Text = "Opening browser...";
 
         try {
-            using var httpClient = new HttpClient();
+            var clientFactory = _services.GetRequiredService<IHttpClientFactory>();
+            using var httpClient = clientFactory.CreateClient();
             var response = await httpClient.GetStringAsync("http://localhost:5291/auth/login");
             var authData = JsonSerializer.Deserialize<Dictionary<string, string>>(response);
 

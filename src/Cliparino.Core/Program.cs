@@ -114,6 +114,7 @@ builder.Host.UseSerilog((context, services, configuration) => configuration
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
+builder.Services.AddHttpClient();
 builder.Services.AddHttpClient("Twitch");
 
 builder.Services.AddSingleton<ITwitchAuthStore, TwitchAuthStore>();

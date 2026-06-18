@@ -1153,17 +1153,18 @@ public class SettingsForm : Form {
         }
     }
 
-    private static void TwitchLogin_Click(object? sender, EventArgs e) {
+    private void TwitchLogin_Click(object? sender, EventArgs e) {
         TwitchLoginAsync(sender as Button).SafeFireAndForget("Twitch Login");
     }
 
-    private static async Task TwitchLoginAsync(Button? button) {
+    private async Task TwitchLoginAsync(Button? button) {
         if (button != null) {
             button.Enabled = false;
             button.Text = "Opening browser...";
 
             try {
-                var httpClient = new HttpClient();
+                var httpClientFactory = _services.GetRequiredService<IHttpClientFactory>();
+                using var httpClient = httpClientFactory.CreateClient();
                 var response = await httpClient.GetStringAsync("http://localhost:5291/auth/login");
                 var authData = JsonSerializer.Deserialize<Dictionary<string, string>>(response);
 

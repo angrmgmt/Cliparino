@@ -63,73 +63,71 @@ public class AuthController(ITwitchOAuthService oauthService, ILogger<AuthContro
     [HttpGet("callback")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public IActionResult Callback([FromQuery] string? error) {
-        if (!string.IsNullOrEmpty(error)) {
-            logger.LogWarning("OAuth callback received error: {Error}", error);
-
-            return Content($"""
-                            <!DOCTYPE html>
-                            <html>
-                            <head><title>Authentication Failed</title></head>
-                            <body style='background: #0071c5; color: white; font-family: sans-serif; text-align: center; padding: 50px;'>
-                                <h1>❌ Authentication Failed</h1>
-                                <p>Error: {error}</p>
-                                <p>You can close this window.</p>
-                            </body>
-                            </html>
-                            """, "text/html");
-        }
-
-        return Content("""
-                       <!DOCTYPE html>
-                       <html>
-                       <head><title>Processing Authentication...</title></head>
-                       <body style='background: #0071c5; color: white; font-family: sans-serif; text-align: center; padding: 50px;'>
-                           <h1>🔄 Processing Authentication...</h1>
-                           <p id="status">Completing authentication...</p>
-                           <script>
-                               (async () => {
-                                   try {
-                                       const fragment = window.location.hash.substring(1);
-                                       const params = new URLSearchParams(fragment);
-                                       const accessToken = params.get('access_token');
-                                       const state = params.get('state');
-                                       
-                                       if (!accessToken) {
-                                           document.getElementById('status').innerText = 'Error: No access token received';
-                                           return;
-                                       }
-                                       
-                                       const response = await fetch('/auth/complete', {
-                                           method: 'POST',
-                                           headers: { 'Content-Type': 'application/json' },
-                                           body: JSON.stringify({ accessToken, state })
-                                       });
-                                       
-                                       const result = await response.json();
-                                       
-                                       if (result.success) {
+        if (string.IsNullOrEmpty(error))
+            return Content("""
+                           <!DOCTYPE html>
+                           <html>
+                           <head><title>Processing Authentication...</title></head>
+                           <body style='background: #0071c5; color: white; font-family: sans-serif; text-align: center; padding: 50px;'>
+                               <h1>🔄 Processing Authentication...</h1>
+                               <p id="status">Completing authentication...</p>
+                               <script>
+                                   (async () => {
+                                       try {
+                                           const fragment = window.location.hash.substring(1);
+                                           const params = new URLSearchParams(fragment);
+                                           const accessToken = params.get('access_token');
+                                           const state = params.get('state');
+                                           
+                                           if (!accessToken) {
+                                               document.getElementById('status').innerText = 'Error: No access token received';
+                                               return;
+                                           }
+                                           
+                                           const response = await fetch('/auth/complete', {
+                                               method: 'POST',
+                                               headers: { 'Content-Type': 'application/json' },
+                                               body: JSON.stringify({ accessToken, state })
+                                           });
+                                           
+                                           const result = await response.json();
+                                           
+                                           if (result.success) {
+                                               document.body.innerHTML = `
+                                                   <h1>✅ Authentication Successful!</h1>
+                                                   <p>You can close this window and return to Cliparino.</p>
+                                               `;
+                                           } else {
+                                               document.body.innerHTML = `
+                                                   <h1>❌ Authentication Failed</h1>
+                                                   <p>${result.error || 'Unknown error'}</p>
+                                                   <p>Please check the application logs for details.</p>
+                                               `;
+                                           }
+                                       } catch (ex) {
                                            document.body.innerHTML = `
-                                               <h1>✅ Authentication Successful!</h1>
-                                               <p>You can close this window and return to Cliparino.</p>
-                                           `;
-                                       } else {
-                                           document.body.innerHTML = `
-                                               <h1>❌ Authentication Failed</h1>
-                                               <p>${result.error || 'Unknown error'}</p>
-                                               <p>Please check the application logs for details.</p>
+                                               <h1>❌ Authentication Error</h1>
+                                               <p>An error occurred: ${ex.message}</p>
                                            `;
                                        }
-                                   } catch (ex) {
-                                       document.body.innerHTML = `
-                                           <h1>❌ Authentication Error</h1>
-                                           <p>An error occurred: ${ex.message}</p>
-                                       `;
-                                   }
-                               })();
-                           </script>
-                       </body>
-                       </html>
-                       """, "text/html");
+                                   })();
+                               </script>
+                           </body>
+                           </html>
+                           """, "text/html");
+        logger.LogWarning("OAuth callback received error: {Error}", error);
+
+        return Content($"""
+                        <!DOCTYPE html>
+                        <html>
+                        <head><title>Authentication Failed</title></head>
+                        <body style='background: #0071c5; color: white; font-family: sans-serif; text-align: center; padding: 50px;'>
+                            <h1>❌ Authentication Failed</h1>
+                            <p>Error: {error}</p>
+                            <p>You can close this window.</p>
+                        </body>
+                        </html>
+                        """, "text/html");
     }
 
     /// <summary>
@@ -178,7 +176,7 @@ public class AuthController(ITwitchOAuthService oauthService, ILogger<AuthContro
     }
 
     /// <summary>
-    ///     Logs out by clearing persisted authentication state, if supported by the configured OAuth store.
+    ///     Logs out by clearing the persisted authentication state, if supported by the configured OAuth store.
     /// </summary>
     /// <returns><c>200 OK</c> when logout completes.</returns>
     [HttpPost("logout")]

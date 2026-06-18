@@ -53,7 +53,6 @@ public class TwitchEventCoordinator : BackgroundService {
     private readonly IHealthReporter? _healthReporter;
     private readonly TwitchIrcEventSource _ircSource;
     private readonly ILogger<TwitchEventCoordinator> _logger;
-
     private ITwitchEventSource? _activeSource;
     private int _reconnectAttempts;
     private bool _useEventSub = true;
