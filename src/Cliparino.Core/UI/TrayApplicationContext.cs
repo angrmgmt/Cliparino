@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using Cliparino.Core.Extensions;
 using Cliparino.Core.Services;
+using Timer = System.Windows.Forms.Timer;
 
 namespace Cliparino.Core.UI;
 
@@ -21,8 +22,10 @@ namespace Cliparino.Core.UI;
 /// </remarks>
 public class TrayApplicationContext : ApplicationContext {
     private static readonly Icon AppIcon = LoadAppIcon();
+    private static readonly string[] Suggestions = ["Check logs folder", "Ensure you have enough disk space"];
     private readonly IServiceProvider _services;
     private readonly NotifyIcon _trayIcon;
+    private bool _disposed;
     private bool _isCheckingForUpdates;
     private ComponentStatus _lastObsStatus = ComponentStatus.Unknown;
     private ComponentStatus _lastTwitchStatus = ComponentStatus.Unknown;
@@ -62,6 +65,30 @@ public class TrayApplicationContext : ApplicationContext {
         if (oauthService != null) oauthService.AuthenticationCompleted += OnAuthenticationCompleted;
 
         UpdateTrayStatus();
+
+        // Run OBS audio setup after a short delay so the tray icon is fully
+        // visible before we potentially show a balloon tip.
+        var setupTimer = new Timer { Interval = 2000 };
+        setupTimer.Tick += (_, _) => {
+            setupTimer.Stop();
+            setupTimer.Dispose();
+            RunObsAudioSetup();
+        };
+        setupTimer.Start();
+    }
+
+    private void RunObsAudioSetup() {
+        try {
+            var setup = _services.GetService<ObsAudioSetupService>();
+
+            if (setup == null) return;
+            var message = setup.EnsureObsAudioEnabled();
+            if (message != null)
+                _trayIcon.ShowBalloonTip(10000, "Clip Audio Setup", message, ToolTipIcon.Info);
+        } catch (Exception ex) {
+            // Non-fatal — log and continue.
+            Debug.WriteLine($"[Cliparino] OBS audio setup error: {ex.Message}");
+        }
     }
 
     private void OnAuthenticationCompleted(object? sender, OAuthCompletedEventArgs e) {
@@ -103,6 +130,8 @@ public class TrayApplicationContext : ApplicationContext {
     }
 
     private void OnHealthChanged(object? sender, HealthChangedEventArgs e) {
+        if (_disposed) return;
+
         if (e.ComponentName == "OBS") {
             if (_lastObsStatus != ComponentStatus.Unknown && _lastObsStatus != e.Status)
                 ShowConnectionBalloon("OBS", e.Status);
@@ -127,6 +156,8 @@ public class TrayApplicationContext : ApplicationContext {
     }
 
     private void UpdateTrayStatus() {
+        if (_disposed) return;
+
         var baseIcon = AppIcon;
         var healthReporter = _services.GetService<IHealthReporter>();
         var status = healthReporter?.GetAggregateStatus() ?? GetLegacyAggregateStatus();
@@ -144,7 +175,11 @@ public class TrayApplicationContext : ApplicationContext {
             icon = AddOverlay(baseIcon, overlayColor);
         }
 
-        var obsStatus = _lastObsStatus == ComponentStatus.Healthy ? "Connected" : "Disconnected";
+        var obsStatus = _lastObsStatus switch {
+            ComponentStatus.Healthy => "Connected",
+            ComponentStatus.Degraded => "Degraded",
+            _ => "Disconnected"
+        };
 
         var twitchAuthStore = _services.GetService<ITwitchAuthStore>();
         var twitchConnected = twitchAuthStore?.HasValidTokensAsync().Result ?? false;
@@ -254,7 +289,7 @@ public class TrayApplicationContext : ApplicationContext {
         } catch (Exception) {
             UserFriendlyDialogs.ShowError("Can't open settings right now. Try closing and reopening Cliparino.",
                 "Settings Error",
-                new[] { "Restart Cliparino", "Check if another instance is already running" });
+                ["Restart Cliparino", "Check if another instance is already running"]);
         }
     }
 
@@ -286,7 +321,7 @@ public class TrayApplicationContext : ApplicationContext {
                 UserFriendlyDialogs.ShowError(
                     "Can't export diagnostics right now. Check the 'logs' folder for recent activity.",
                     "Diagnostics Unavailable",
-                    new[] { "Check logs folder manually", "Restart Cliparino" });
+                    ["Check logs folder manually", "Restart Cliparino"]);
 
                 return;
             }
@@ -305,7 +340,7 @@ public class TrayApplicationContext : ApplicationContext {
             UserFriendlyDialogs.ShowError(
                 "Can't export diagnostics right now. Check the 'logs' folder for recent activity.",
                 "Export Failed",
-                new[] { "Check logs folder", "Ensure you have enough disk space" });
+                Suggestions);
         }
     }
 
@@ -320,7 +355,7 @@ public class TrayApplicationContext : ApplicationContext {
             if (playbackEngine == null) {
                 UserFriendlyDialogs.ShowError("Clip player is starting up. Please wait a moment and try again.",
                     "Playback Engine Unavailable",
-                    new[] { "Wait a few seconds", "Check if Cliparino is still initializing" });
+                    ["Wait a few seconds", "Check if Cliparino is still initializing"]);
 
                 return;
             }
@@ -338,7 +373,7 @@ public class TrayApplicationContext : ApplicationContext {
         } catch (Exception) {
             UserFriendlyDialogs.ShowError("Clip player is starting up. Please wait a moment and try again.",
                 "Status Error",
-                new[] { "Wait a few seconds", "Restart Cliparino if this persists" });
+                ["Wait a few seconds", "Restart Cliparino if this persists"]);
         }
     }
 
@@ -356,7 +391,7 @@ public class TrayApplicationContext : ApplicationContext {
             if (updateChecker == null) {
                 UserFriendlyDialogs.ShowError("Can't check for updates right now. We'll try again automatically later.",
                     "Update Checker Unavailable",
-                    new[] { "Check your internet connection", "Try again in a few minutes" });
+                    ["Check your internet connection", "Try again in a few minutes"]);
 
                 return;
             }
@@ -376,60 +411,47 @@ public class TrayApplicationContext : ApplicationContext {
                 if (result == DialogResult.Yes)
                     Process.Start(new ProcessStartInfo(updateInfo.ReleaseUrl) { UseShellExecute = true });
             } else {
-                MessageBox.Show("You are running the latest version.", "No Updates", MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                MessageBox.Show($"Cliparino is up to date (v{updateChecker.CurrentVersion}).", "No Updates",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
-        } catch (ObjectDisposedException) {
-            UserFriendlyDialogs.ShowShutdownWarning();
-        } catch (Exception) {
-            UserFriendlyDialogs.ShowError("Can't check for updates right now. We'll try again automatically later.",
-                "Update Check Failed",
-                new[] { "Check your internet connection", "Visit our GitHub page for manual updates" });
+        } catch (Exception ex) {
+            Debug.WriteLine($"[Cliparino] Update check error: {ex.Message}");
         } finally {
             _isCheckingForUpdates = false;
         }
     }
 
-    private static void ShowAbout(object? sender, EventArgs e) {
-        var version = typeof(TrayApplicationContext).Assembly.GetName().Version;
-        MessageBox.Show($"Cliparino - Twitch Clip Player\n\n" +
-                        $"Version: {version}\n\n" +
-                        $"A standalone clip player for Twitch streamers.\n\n" +
-                        $"For support and updates, visit:\n" +
-                        $"github.com/angrmgmt/Cliparino",
+    private void RunSetupWizard(object? sender, EventArgs e) {
+        try {
+            var wizard = new WelcomeWizard(_services);
+            wizard.Show();
+        } catch (Exception ex) {
+            UserFriendlyDialogs.ShowError($"Can't start setup wizard: {ex.Message}", "Setup Error",
+                ["Restart Cliparino", "Check logs"]);
+        }
+    }
+
+    private void ShowAbout(object? sender, EventArgs e) {
+        MessageBox.Show("Cliparino v2.0.0\n\nA modern Twitch clip player for streamers.\n\nDeveloped by angrmgmt",
             "About Cliparino",
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);
     }
 
-    private void RunSetupWizard(object? sender, EventArgs e) {
-        var wizard = new WelcomeWizard(_services);
-        wizard.ShowDialog();
-    }
-
     private void Exit(object? sender, EventArgs e) {
         _trayIcon.Visible = false;
-
-        // Signal the generic host to shut down
-        var lifetime = _services.GetService<IHostApplicationLifetime>();
-        lifetime?.StopApplication();
-
         Application.Exit();
     }
 
-
-    /// <summary>
-    ///     Disposes the tray icon and any UI resources created by this application context.
-    /// </summary>
-    /// <param name="disposing">
-    ///     <see langword="true" /> to dispose managed resources; otherwise <see langword="false" />.
-    /// </param>
     protected override void Dispose(bool disposing) {
+        if (_disposed) return;
+
         if (disposing) {
             _trayIcon.Dispose();
             _settingsForm?.Dispose();
         }
 
+        _disposed = true;
         base.Dispose(disposing);
     }
 }

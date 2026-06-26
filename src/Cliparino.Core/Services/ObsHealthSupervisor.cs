@@ -42,6 +42,7 @@ public class ObsHealthSupervisor : BackgroundService {
     private const int MaxReconnectAttempts = 10;
     private readonly BackoffPolicy _backoffPolicy = BackoffPolicy.Default;
     private readonly IHealthReporter? _healthReporter;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<ObsHealthSupervisor> _logger;
     private readonly IObsController _obsController;
     private readonly IOptionsMonitor<ObsOptions> _obsOptions;
@@ -57,16 +58,19 @@ public class ObsHealthSupervisor : BackgroundService {
     /// <param name="logger">Logger for diagnostic messages</param>
     /// <param name="obsOptions">OBS configuration options</param>
     /// <param name="playerOptions">Player configuration options</param>
+    /// <param name="httpClientFactory">Factory for creating HTTP clients to verify player accessibility</param>
     /// <param name="healthReporter">Optional health reporter for diagnostics (null in tests)</param>
     public ObsHealthSupervisor(IObsController obsController,
         ILogger<ObsHealthSupervisor> logger,
         IOptionsMonitor<ObsOptions> obsOptions,
         IOptionsMonitor<PlayerOptions> playerOptions,
+        IHttpClientFactory httpClientFactory,
         IHealthReporter? healthReporter = null) {
         _obsController = obsController;
         _logger = logger;
         _obsOptions = obsOptions;
         _playerOptions = playerOptions;
+        _httpClientFactory = httpClientFactory;
         _healthReporter = healthReporter;
 
         _obsController.Disconnected += OnObsDisconnected;
@@ -223,16 +227,57 @@ public class ObsHealthSupervisor : BackgroundService {
         } catch (Exception ex) {
             _logger.LogError(ex, "Error during OBS health check");
         }
+
+        await CheckPlayerAccessibilityAsync();
     }
 
     /// <summary>
-    ///     Repairs OBS configuration drift by recreating/updating the scene, source, and browser URL.
+    ///     Verifies that the player web interface is accessible via HTTP.
+    /// </summary>
+    /// <returns>A task representing the accessibility check</returns>
+    /// <remarks>
+    ///     This check simulates a "standard browser" request to verify the local web server is
+    ///     correctly serving the player page. If this succeeds but OBS shows a 404, the issue
+    ///     is likely within OBS's CEF browser source rather than the Cliparino server.
+    /// </remarks>
+    private async Task CheckPlayerAccessibilityAsync() {
+        try {
+            _logger.LogDebug("Verifying player accessibility at {Url}...", PlayerUrl);
+
+            using var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(5);
+
+            var response = await client.GetAsync(PlayerUrl);
+
+            if (response.IsSuccessStatusCode) {
+                _logger.LogDebug("Player web interface is accessible");
+                _healthReporter?.ReportHealth("PlayerServer", ComponentStatus.Healthy);
+            } else {
+                _logger.LogWarning("Player web interface returned {StatusCode} at {Url}", response.StatusCode,
+                    PlayerUrl);
+                _healthReporter?.ReportHealth("PlayerServer", ComponentStatus.Unhealthy,
+                    $"Server returned {response.StatusCode}");
+            }
+        } catch (Exception ex) {
+            _logger.LogError(ex, "Failed to verify player accessibility at {Url}", PlayerUrl);
+            _healthReporter?.ReportHealth("PlayerServer", ComponentStatus.Unhealthy,
+                $"Accessibility check failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    ///     Repairs OBS configuration drift by recreating/updating the scene, source, URL, and dimensions.
     /// </summary>
     /// <returns>A task representing the repair operation</returns>
     /// <remarks>
-    ///     This method restores the desired state by ensuring the scene and source exist with correct
-    ///     settings, updating the browser source URL, and refreshing the source. Called automatically
-    ///     when drift is detected during health checks.
+    ///     Restoration happens in three steps:
+    ///     1. <see cref="IObsController.EnsureClipSceneAndSourceExistsAsync" /> — creates the scene/source
+    ///        if missing (no-op when the source already exists).
+    ///     2. <see cref="IObsController.RepairConfigurationDriftAsync" /> — directly applies the expected
+    ///        URL, width, and height to the existing source so that width/height drift is actually corrected,
+    ///        not just detected.
+    ///     3. <see cref="IObsController.RefreshBrowserSourceAsync" /> — reloads the browser source so the
+    ///        player page reflects any changes immediately.
     /// </remarks>
     private async Task RepairConfigurationAsync() {
         try {
@@ -240,7 +285,12 @@ public class ObsHealthSupervisor : BackgroundService {
 
             await _obsController.EnsureClipSceneAndSourceExistsAsync(SceneName, SourceName, PlayerUrl, Width, Height);
 
-            await _obsController.SetBrowserSourceUrlAsync(SceneName, SourceName, PlayerUrl);
+            // Apply the expected settings directly — EnsureClipSceneAndSourceExistsAsync only
+            // creates the source on first run and leaves an existing source unchanged.
+            await _obsController.RepairConfigurationDriftAsync(SourceName, PlayerUrl, Width, Height);
+
+            // Ensure audio is unmuted and monitoring is correctly configured
+            await _obsController.EnsureInputAudioConfigAsync(SourceName);
 
             await _obsController.RefreshBrowserSourceAsync(SourceName);
 
@@ -266,6 +316,11 @@ public class ObsHealthSupervisor : BackgroundService {
             _logger.LogInformation("Ensuring OBS scene and source configuration...");
 
             await _obsController.EnsureClipSceneAndSourceExistsAsync(SceneName, SourceName, PlayerUrl, Width, Height);
+
+            // Ensure audio is unmuted and monitoring is correctly configured
+            await _obsController.EnsureInputAudioConfigAsync(SourceName);
+
+            await CheckPlayerAccessibilityAsync();
 
             _logger.LogInformation("OBS configuration verified");
         } catch (Exception ex) {

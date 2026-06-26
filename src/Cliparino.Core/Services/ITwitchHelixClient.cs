@@ -169,4 +169,31 @@ public interface ITwitchHelixClient {
     ///     </para>
     /// </remarks>
     Task<bool> SendShoutoutAsync(string fromBroadcasterId, string toBroadcasterId);
+
+    /// <summary>
+    ///     Fetches a time-limited signed download URL for a clip video file.
+    /// </summary>
+    /// <param name="clipId">The Twitch clip ID (slug)</param>
+    /// <returns>
+    ///     The first download URL from the response, or <see langword="null" /> if the request fails
+    ///     or the user is not authenticated.
+    /// </returns>
+    /// <remarks>
+    ///     Uses <c>GET https://api.twitch.tv/helix/clips/download?clip_id={clipId}</c> (GA since 2025-10-30).
+    ///     The returned URL is time-limited (~5 minutes). Call this close to when the clip will play.
+    /// </remarks>
+    Task<string?> GetClipDownloadUrlAsync(string clipId);
+
+    /// <summary>
+    ///     Fetches a direct video URL for a clip using Twitch's internal GraphQL API.
+    /// </summary>
+    /// <param name="clipId">The Twitch clip ID (slug)</param>
+    /// <returns>
+    ///     The direct MP4 URL with authentication tokens, or <see langword="null" /> if the request fails.
+    /// </returns>
+    /// <remarks>
+    ///     This is a "hack" method that bypasses the official Helix downloads API, allowing it to work
+    ///     for clips from any broadcaster without requiring special permissions.
+    /// </remarks>
+    Task<string?> GetClipVideoUrlGqlAsync(string clipId);
 }

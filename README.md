@@ -31,9 +31,10 @@ Cliparino is a standalone Windows tray application for playing Twitch clips duri
 
 ### OBS Integration
 - **Automatic Scene Management**: Creates/manages scenes and sources automatically
-- **Flexible Display**: Configurable dimensions (auto 16:9 aspect ratio)
-- **Browser Source**: Clips served via local HTTP server
-- **Drift Repair**: Auto-corrects configuration mismatches
+- **Configurable Dimensions**: Width and height stored under the `OBS:` config key, applied to both the OBS browser source and the player page layout
+- **Browser Source**: Clips served via local HTTP server at `http://localhost:5291`
+- **Audio**: Clips start muted for guaranteed autoplay, then unmuted programmatically once playback begins — no manual interaction required
+- **Drift Repair**: Detects and corrects configuration mismatches (URL, width, height) automatically every 60 seconds
 
 ### Technical Features
 - **Intelligent Caching**: Reduces API calls, improves search performance
@@ -168,11 +169,14 @@ Cliparino is configured via `appsettings.json` (located next to the executable).
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `Obs:Host` | `localhost` | OBS WebSocket host |
-| `Obs:Port` | `4455` | OBS WebSocket port |
-| `Obs:Password` | *(empty)* | OBS WebSocket password |
-| `Player:SceneName` | `Cliparino` | OBS scene name used/managed by Cliparino |
-| `Player:SourceName` | `Cliparino Player` | OBS browser source name used/managed by Cliparino |
+| `OBS:Host` | `localhost` | OBS WebSocket host |
+| `OBS:Port` | `4455` | OBS WebSocket port |
+| `OBS:Password` | *(empty)* | OBS WebSocket password |
+| `OBS:SceneName` | `Cliparino` | OBS scene name used/managed by Cliparino |
+| `OBS:SourceName` | `CliparinoPlayer` | OBS browser source name used/managed by Cliparino |
+| `OBS:Width` | `1920` | Browser source width (pixels) — must match OBS source dimensions |
+| `OBS:Height` | `1080` | Browser source height (pixels) — must match OBS source dimensions |
+| `Player:Url` | `http://localhost:5291` | URL the OBS browser source loads |
 | `Player:Width` | `1920` | Player viewport width (pixels) |
 | `Player:Height` | `1080` | Player viewport height (pixels) |
 | `Shoutout:EnableMessage` | `true` | Whether Cliparino sends a shoutout chat message |
@@ -186,23 +190,29 @@ Cliparino is configured via `appsettings.json` (located next to the executable).
 
 ```json
 {
-  "Obs": {
+  "OBS": {
     "Host": "localhost",
-    "Port": "4455",
-    "Password": ""
+    "Port": 4455,
+    "Password": "",
+    "SceneName": "Cliparino",
+    "SourceName": "CliparinoPlayer",
+    "Width": 1920,
+    "Height": 1080
   },
   "Player": {
-    "SceneName": "Cliparino",
-    "SourceName": "Cliparino Player",
-    "Width": "1920",
-    "Height": "1080"
+    "Url": "http://localhost:5291",
+    "Width": 1920,
+    "Height": 1080,
+    "InfoTextColor": "#ffb809",
+    "InfoBackgroundColor": "#0071c5",
+    "InfoFontFamily": "OpenDyslexic, 'Open Sans', sans-serif"
   },
   "Shoutout": {
-    "EnableMessage": "true",
+    "EnableMessage": true,
     "MessageTemplate": "Check out {broadcaster}! They were last playing {game}! twitch.tv/{broadcaster}",
-    "UseFeaturedClips": "true",
-    "MaxClipLength": "60",
-    "MaxClipAge": "30"
+    "UseFeaturedClips": true,
+    "MaxClipLength": 60,
+    "MaxClipAge": 30
   },
   "Logging": {
     "LogLevel": {
@@ -221,6 +231,8 @@ The local web host listens on `http://localhost:5291` (HTTP) and `https://localh
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/status` | Current player state, current clip (if any), and queue size |
+| GET | `/api/settings` | Current player style settings (colors, font, dimensions) consumed by the browser source |
+| GET | `/api/clip/{clipId}/download-url` | Time-limited signed download URL for a clip (Twitch GA 2025-10-30). Returns `{"url":"..."}` on success; `404` when the clip has no download URL (only available for clips owned by the authenticated broadcaster); `503` when the Twitch client is unavailable |
 | POST | `/api/play` | Enqueue a clip for playback (body: `PlayClipRequest`) |
 | POST | `/api/replay` | Replay the most recently played clip |
 | POST | `/api/stop` | Stop playback |

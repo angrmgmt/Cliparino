@@ -21,11 +21,6 @@ Background services (registered via AddHostedService) run on the generic host an
 - Periodic update checks and diagnostics
 */
 
-
-Application.SetHighDpiMode(HighDpiMode.SystemAware);
-Application.EnableVisualStyles();
-Application.SetCompatibleTextRenderingDefault(false);
-
 var logsDir = Path.Combine(AppContext.BaseDirectory, "logs");
 Directory.CreateDirectory(logsDir);
 
@@ -98,7 +93,7 @@ if (!PortUtilities.IsPortAvailable(httpsPort) || !PortUtilities.IsPortAvailable(
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Configuration.AddJsonFile("appsettings.json", false, true);
+builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.json"), false, true);
 
 builder.Services.Configure<ObsOptions>(builder.Configuration.GetSection("OBS"));
 builder.Services.Configure<PlayerOptions>(builder.Configuration.GetSection("Player"));
@@ -139,6 +134,8 @@ builder.Services.AddHostedService<TwitchEventCoordinator>();
 builder.Services.AddSingleton<IObsController, ObsController>();
 builder.Services.AddHostedService<ObsHealthSupervisor>();
 
+builder.Services.AddSingleton<ObsAudioSetupService>();
+builder.Services.AddSingleton<ICefClickService, CefClickService>();
 builder.Services.AddSingleton<IHealthReporter, HealthReporter>();
 builder.Services.AddSingleton<IDiagnosticsService, DiagnosticsService>();
 builder.Services.AddSingleton<IUpdateChecker, UpdateChecker>();
@@ -177,6 +174,22 @@ app.MapGet("/", async context => {
 
     htmlTemplate = htmlTemplate.Replace("</head>", $"{styleInjection}</head>");
 
+    // Append each static file's last-write timestamp as a query string so OBS's CEF
+    // browser always fetches fresh assets after a build rather than using stale cached copies.
+    var webRoot = app.Environment.WebRootPath;
+
+    var playerJsPath = Path.Combine(webRoot, "player.js");
+    var playerJsVersion = File.Exists(playerJsPath)
+        ? File.GetLastWriteTimeUtc(playerJsPath).Ticks
+        : DateTime.UtcNow.Ticks;
+    htmlTemplate = htmlTemplate.Replace("src=\"/player.js\"", $"src=\"/player.js?v={playerJsVersion}\"");
+
+    var indexCssPath = Path.Combine(webRoot, "index.css");
+    var indexCssVersion = File.Exists(indexCssPath)
+        ? File.GetLastWriteTimeUtc(indexCssPath).Ticks
+        : DateTime.UtcNow.Ticks;
+    htmlTemplate = htmlTemplate.Replace("href=\"/index.css\"", $"href=\"/index.css?v={indexCssVersion}\"");
+
     context.Response.ContentType = "text/html";
     await context.Response.WriteAsync(htmlTemplate);
 });
@@ -194,9 +207,29 @@ app.Logger.LogInformation("API endpoints: http://localhost:{HttpPort}/api/status
 try {
     var appTask = app.RunAsync();
 
-    var trayContext = new TrayApplicationContext(app.Services);
-    Application.Run(trayContext);
+    var uiComplete = new TaskCompletionSource();
+    var uiThread = new Thread(() => {
+        Application.SetHighDpiMode(HighDpiMode.SystemAware);
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
 
+        try {
+            var trayContext = new TrayApplicationContext(app.Services);
+            Application.Run(trayContext);
+        } catch (Exception ex) {
+            HandleGlobalException(ex, "WinForms UI Thread", app);
+            Log.Fatal(ex, "WinForms UI thread terminated unexpectedly");
+        } finally {
+            uiComplete.TrySetResult();
+        }
+    });
+    uiThread.SetApartmentState(ApartmentState.STA);
+    uiThread.IsBackground = false;
+    uiThread.Name = "WinForms UI Thread";
+    uiThread.Start();
+
+    await uiComplete.Task;
+    await app.StopAsync();
     await appTask;
 } catch (Exception ex) {
     HandleGlobalException(ex, "Application Startup Error", app);
@@ -213,7 +246,8 @@ void HandleGlobalException(Exception? ex, string source, WebApplication? webApp)
     Log.Error(ex, "Global exception caught in {Source}", source);
 
     try {
-        var diagnosticsService = webApp?.Services.GetService<IDiagnosticsService>();
+        var services = webApp?.Services;
+        var diagnosticsService = services?.GetService<IDiagnosticsService>();
 
         if (diagnosticsService != null) {
             var zipBytes = diagnosticsService.ExportDiagnosticsZipAsync().Result;

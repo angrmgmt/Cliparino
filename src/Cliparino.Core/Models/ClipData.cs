@@ -39,4 +39,11 @@ public record ClipData(
     DateTime CreatedAt,
     int ViewCount,
     bool IsFeatured
-);
+) {
+    /// <summary>
+    ///     The Twitch CDN thumbnail URL from the Helix API.
+    ///     Stripping the <c>-preview-WxH.jpg</c> suffix and appending <c>.mp4</c> yields the direct
+    ///     video file URL, which can be played in a &lt;video&gt; element without a cross-origin iframe.
+    /// </summary>
+    public string ThumbnailUrl { get; init; } = "";
+}

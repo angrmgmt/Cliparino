@@ -28,6 +28,7 @@ public class SettingsForm : Form {
     private NumericUpDown _approvalTimeoutNumeric = null!;
     private NumericUpDown _checkIntervalHoursNumeric = null!;
     private CheckBox _checkOnStartupCheckBox = null!;
+    private bool _disposed;
     private CheckBox _enableShoutoutMessageCheckBox = null!;
     private CheckedListBox _exemptRolesCheckedListBox = null!;
     private TrackBar _fuzzyMatchThresholdTrackBar = null!;
@@ -50,6 +51,8 @@ public class SettingsForm : Form {
     private NumericUpDown _maxClipAgeNumeric = null!;
     private NumericUpDown _maxClipLengthNumeric = null!;
     private Label? _obsAuthCheck;
+    private Label? _obsCefFlagCheck;
+    private TextBox _obsExePathTextBox = null!;
     private TextBox _obsHostTextBox = null!;
     private RadioButton _obsLocalRadioButton = null!;
     private Label _obsPasswordStoredIndicator = null!;
@@ -88,7 +91,11 @@ public class SettingsForm : Form {
     }
 
     protected override void Dispose(bool disposing) {
+        if (_disposed) return;
+
         if (disposing) {
+            _disposed = true;
+
             // Unsubscribe from events to prevent memory leaks
             var oauthService = _services.GetService<ITwitchOAuthService>();
 
@@ -99,6 +106,8 @@ public class SettingsForm : Form {
     }
 
     private void OnAuthenticationCompleted(object? sender, OAuthCompletedEventArgs e) {
+        if (_disposed) return;
+
         Log.Information("Twitch authentication completed. Success: {Success}, Username: {Username}, Error: {Error}",
             e.Success, e.Username ?? "N/A", e.ErrorMessage ?? "None");
 
@@ -180,6 +189,14 @@ public class SettingsForm : Form {
             Text = "⏳ Checking credentials...", Location = new Point(30, y), Size = new Size(400, 20)
         };
         panel.Controls.Add(_obsAuthCheck);
+        y += 22;
+
+        _obsCefFlagCheck = new Label {
+            Text = "⏳ Checking CEF audio flag...", Location = new Point(30, y), Size = new Size(400, 20)
+        };
+        _toolTip.SetToolTip(_obsCefFlagCheck,
+            "Reads OBS's process command line to verify the --autoplay-policy flag was passed to CEF");
+        panel.Controls.Add(_obsCefFlagCheck);
         y += 30;
 
         var runChecksButton = new Button {
@@ -196,6 +213,17 @@ public class SettingsForm : Form {
         };
         panel.Controls.Add(separator);
         y += 15;
+
+        panel.Controls.Add(new Label { Text = "OBS Executable / Shortcut:", Location = new Point(10, y), Width = 160 });
+        _obsExePathTextBox = new TextBox { Location = new Point(170, y), Width = 245 };
+        _toolTip.SetToolTip(_obsExePathTextBox,
+            "Optional: path to obs64.exe or an OBS shortcut (.lnk). Leave blank to auto-detect from running process or registry.");
+        panel.Controls.Add(_obsExePathTextBox);
+        var browseButton = new Button { Text = "Browse...", Location = new Point(425, y - 2), Size = new Size(80, 26) };
+        browseButton.Click += BrowseObsExecutable_Click;
+        panel.Controls.Add(browseButton);
+        _obsExePathTextBox.TextChanged += (_, _) => UpdateCefFlagStatus();
+        y += 35;
 
         // Connection settings
         panel.Controls.Add(new Label { Text = "OBS Location:", Location = new Point(10, y), Width = 150 });
@@ -288,6 +316,7 @@ public class SettingsForm : Form {
         if (obsController is { IsConnected: true }) {
             Log.Information("OBS already connected, skipping detailed pre-flight checks");
             UpdateObsPreFlightUiConnected();
+            UpdateCefFlagStatus();
 
             return;
         }
@@ -362,23 +391,80 @@ public class SettingsForm : Form {
             _obsAuthCheck.Text = "⚠️ OBS service not available";
             _obsAuthCheck.ForeColor = Color.Orange;
         }
+
+        UpdateCefFlagStatus();
     }
 
-    private void ShowObsWebSocketHelp() {
-        var message = """
-                      How to Enable OBS WebSocket Server:
+    private void UpdateCefFlagStatus() {
+        if (_obsCefFlagCheck == null) return;
 
-                      1. Open OBS Studio
-                      2. Go to Tools → WebSocket Server Settings
-                      3. Check "Enable WebSocket server"
-                      4. Note the port number (default: 4455)
-                      5. If you set a password, enter it in Cliparino
+        var audioSetup = _services.GetService<ObsAudioSetupService>();
 
-                      OBS 28 and newer have WebSocket built-in.
-                      For older versions, install the obs-websocket plugin.
+        if (audioSetup == null) {
+            _obsCefFlagCheck.Text = "⚠️ Audio setup service unavailable";
+            _obsCefFlagCheck.ForeColor = Color.Orange;
 
-                      For more help, visit our wiki.
-                      """;
+            return;
+        }
+
+        if (audioSetup.IsRunningWithFlag()) {
+            _obsCefFlagCheck.Text = "✅ CEF autoplay flag is active";
+            _obsCefFlagCheck.ForeColor = Color.Green;
+
+            return;
+        }
+
+        // If the running process doesn't show the flag, check whether the configured shortcut
+        // already has it — so the user gets confirmation without needing to restart OBS.
+        var configuredPath = _obsExePathTextBox.Text.Trim();
+
+        if (!string.IsNullOrEmpty(configuredPath) &&
+            configuredPath.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase) &&
+            File.Exists(configuredPath) &&
+            audioSetup.ShortcutHasFlag(configuredPath)) {
+            _obsCefFlagCheck.Text = "✅ OBS shortcut is configured for clip audio";
+            _obsCefFlagCheck.ForeColor = Color.Green;
+
+            return;
+        }
+
+        var obsRunning = Process.GetProcessesByName("obs64").Length > 0 ||
+                         Process.GetProcessesByName("obs").Length > 0;
+
+        if (obsRunning) {
+            _obsCefFlagCheck.Text = "⚠️ CEF autoplay flag not detected — clips may play silently";
+            _obsCefFlagCheck.ForeColor = Color.Orange;
+        } else {
+            _obsCefFlagCheck.Text = "ℹ️ OBS not running — cannot verify CEF flag";
+            _obsCefFlagCheck.ForeColor = Color.Gray;
+        }
+    }
+
+    private void BrowseObsExecutable_Click(object? sender, EventArgs e) {
+        using var dialog = new OpenFileDialog();
+        dialog.Title = "Select OBS Executable or Shortcut";
+        dialog.Filter = "OBS Executable or Shortcut|obs64.exe;obs32.exe;*.lnk|Executables|*.exe|All Files|*.*";
+        dialog.CheckFileExists = true;
+
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+            _obsExePathTextBox.Text = dialog.FileName;
+    }
+
+    private static void ShowObsWebSocketHelp() {
+        const string message = """
+                               How to Enable OBS WebSocket Server:
+
+                               1. Open OBS Studio
+                               2. Go to Tools → WebSocket Server Settings
+                               3. Check "Enable WebSocket server"
+                               4. Note the port number (default: 4455)
+                               5. If you set a password, enter it in Cliparino
+
+                               OBS 28 and newer have WebSocket built-in.
+                               For older versions, install the obs-websocket plugin.
+
+                               For more help, visit our wiki.
+                               """;
 
         var result = MessageBox.Show(message,
             "How to Enable WebSocket",
@@ -787,6 +873,8 @@ public class SettingsForm : Form {
         _initialObsPassword = _configuration["OBS:Password"] ?? "";
         _obsPasswordTextBox.Text = _initialObsPassword;
 
+        _obsExePathTextBox.Text = _configuration["OBS:ExecutablePath"] ?? "";
+
         // Update password stored indicator
         if (!string.IsNullOrEmpty(_initialObsPassword)) {
             _obsPasswordStoredIndicator.Text = "✅ Stored";
@@ -861,20 +949,21 @@ public class SettingsForm : Form {
 
             existingConfig["OBS"] = new Dictionary<string, object> {
                 ["Host"] = _obsLocalRadioButton.Checked ? "localhost" : _obsHostTextBox.Text,
-                ["Port"] = _obsPortNumeric.Value.ToString(CultureInfo.InvariantCulture),
+                ["Port"] = (int)_obsPortNumeric.Value,
                 ["Password"] = _obsPasswordTextBox.Text,
                 ["SceneName"] = _sceneNameTextBox.Text,
                 ["SourceName"] = _sourceNameTextBox.Text,
-                ["Width"] = _widthNumeric.Value.ToString(CultureInfo.InvariantCulture),
-                ["Height"] = _heightNumeric.Value.ToString(CultureInfo.InvariantCulture)
+                ["Width"] = (int)_widthNumeric.Value,
+                ["Height"] = (int)_heightNumeric.Value,
+                ["ExecutablePath"] = _obsExePathTextBox.Text.Trim()
             };
 
             existingConfig["Player"] = new Dictionary<string, object> {
                 ["Url"] = _configuration["Player:Url"] ?? "http://localhost:5291",
                 ["SceneName"] = _sceneNameTextBox.Text,
                 ["SourceName"] = _sourceNameTextBox.Text,
-                ["Width"] = _widthNumeric.Value.ToString(CultureInfo.InvariantCulture),
-                ["Height"] = _heightNumeric.Value.ToString(CultureInfo.InvariantCulture),
+                ["Width"] = (int)_widthNumeric.Value,
+                ["Height"] = (int)_heightNumeric.Value,
                 ["InfoTextColor"] = _infoTextColorTextBox.Text,
                 ["InfoBackgroundColor"] = _infoBackgroundColorTextBox.Text,
                 ["InfoFontFamily"] = _infoFontFamilyComboBox.Text

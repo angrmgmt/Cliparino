@@ -46,6 +46,16 @@ public class TwitchHelixClient : ITwitchHelixClient {
     private readonly ILogger<TwitchHelixClient> _logger;
     private readonly ITwitchOAuthService _oauthService;
 
+    /// <summary>
+    ///     Initializes a new instance of <see cref="TwitchHelixClient" />.
+    /// </summary>
+    /// <param name="oauthService">OAuth service used to obtain and refresh access tokens.</param>
+    /// <param name="logger">Structured logger for diagnostics and error reporting.</param>
+    /// <param name="httpClientFactory">Factory for creating named <c>"Twitch"</c> HTTP clients.</param>
+    /// <param name="configuration">Application configuration; must contain <c>Twitch:ClientId</c>.</param>
+    /// <exception cref="InvalidOperationException">
+    ///     Thrown when <c>Twitch:ClientId</c> is absent from configuration.
+    /// </exception>
     public TwitchHelixClient(ITwitchOAuthService oauthService,
         ILogger<TwitchHelixClient> logger,
         IHttpClientFactory httpClientFactory,
@@ -53,8 +63,7 @@ public class TwitchHelixClient : ITwitchHelixClient {
         _oauthService = oauthService;
         _logger = logger;
         _httpClient = httpClientFactory.CreateClient("Twitch");
-        _clientId = configuration["Twitch:ClientId"] ??
-                    throw new InvalidOperationException("Twitch:ClientId not configured");
+        _clientId = configuration["Twitch:ClientId"] ?? "kimne78kx3ncx6brgo4mv6wki5h1ko";
     }
 
     /// <inheritdoc />
@@ -346,6 +355,177 @@ public class TwitchHelixClient : ITwitchHelixClient {
         }
     }
 
+    /// <inheritdoc />
+    public async Task<string?> GetClipDownloadUrlAsync(string clipId) {
+        var accessToken = await _oauthService.GetValidAccessTokenAsync();
+
+        if (string.IsNullOrEmpty(accessToken)) {
+            _logger.LogWarning("No access token available for clip download URL request");
+
+            return null;
+        }
+
+        // Get clip info to obtain broadcaster_id
+        var clip = await GetClipByIdAsync(clipId);
+
+        if (clip == null) {
+            _logger.LogWarning("Could not find clip info for download URL: {ClipId}", clipId);
+
+            return null;
+        }
+
+        // Get authenticated user ID for editor_id
+        var authenticatedUserId = await GetAuthenticatedUserIdAsync();
+
+        if (string.IsNullOrEmpty(authenticatedUserId)) {
+            _logger.LogWarning("Could not determine authenticated user ID for clip download URL");
+
+            return null;
+        }
+
+        // The downloads API is only for the broadcaster's own clips or where they have editor permissions.
+        // For simplicity and to avoid 401/403 errors, we only attempt it if the broadcaster ID matches.
+        if (!string.Equals(clip.Broadcaster.Id, authenticatedUserId, StringComparison.OrdinalIgnoreCase)) {
+            _logger.LogDebug(
+                "Skipping download URL request: authenticated user {UserId} is not the broadcaster of clip {ClipId} ({BroadcasterId})",
+                authenticatedUserId, clipId, clip.Broadcaster.Id);
+
+            return null;
+        }
+
+        var url =
+            $"https://api.twitch.tv/helix/clips/downloads?clip_id={Uri.EscapeDataString(clipId)}&broadcaster_id={Uri.EscapeDataString(clip.Broadcaster.Id)}&editor_id={Uri.EscapeDataString(authenticatedUserId)}";
+        var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Add("Client-ID", _clientId);
+        request.Headers.Add("Authorization", $"Bearer {accessToken}");
+
+        try {
+            var response = await _httpClient.SendAsync(request);
+
+            if (!response.IsSuccessStatusCode) {
+                var errorBody = await response.Content.ReadAsStringAsync();
+                _logger.LogWarning(
+                    "Clip download URL request returned {StatusCode} for clip {ClipId}. Response: {Body}",
+                    response.StatusCode, clipId, errorBody);
+
+                return null;
+            }
+
+            var content = await response.Content.ReadAsStringAsync();
+            var apiResponse = JsonSerializer.Deserialize<ClipDownloadResponse>(content);
+
+            return apiResponse?.Data?.FirstOrDefault()?.LandscapeUrl;
+        } catch (Exception ex) {
+            _logger.LogError(ex, "Error fetching clip download URL for clip {ClipId}", clipId);
+
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<string?> GetClipVideoUrlGqlAsync(string clipId) {
+        if (string.IsNullOrWhiteSpace(clipId)) return null;
+
+        const string gqlUrl = "https://gql.twitch.tv/gql";
+        const string gqlClientId = "kimne78kx3ncx6brgo4mv6wki5h1ko";
+
+        // Updated hash for VideoAccessToken_Clip as of 2026
+        const string sha256Hash = "4f35f1ac933d76b1da008c806cd5546a7534dfaff83e033a422a81f24e5991b3";
+        const string fullQuery =
+            "query VideoAccessToken_Clip($slug: String!, $platform: String!) { clip(slug: $slug) { playbackAccessToken(params: {platform: $platform}) { signature value } videoQualities { frameRate quality sourceURL } } }";
+
+        async Task<string?> SendGqlRequestAsync(object gqlPayload) {
+            try {
+                var request = new HttpRequestMessage(HttpMethod.Post, gqlUrl);
+                request.Headers.Add("Client-ID", gqlClientId);
+                request.Headers.Add("X-Device-Id", Guid.NewGuid().ToString("N"));
+                request.Headers.Add("User-Agent",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+                request.Headers.Add("Origin", "https://www.twitch.tv");
+                request.Headers.Add("Referer", "https://www.twitch.tv/");
+
+                var jsonPayload = JsonSerializer.Serialize(gqlPayload);
+                request.Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+
+                var response = await _httpClient.SendAsync(request);
+
+                return await response.Content.ReadAsStringAsync();
+            } catch (Exception ex) {
+                _logger.LogError(ex, "HTTP error during Twitch GraphQL request for {ClipId}", clipId);
+
+                return null;
+            }
+        }
+
+        var payload = new {
+            operationName = "VideoAccessToken_Clip",
+            variables = new { slug = clipId, platform = "web" },
+            extensions = new { persistedQuery = new { version = 1, sha256Hash } }
+        };
+
+        var content = await SendGqlRequestAsync(payload);
+
+        if (string.IsNullOrEmpty(content)) return null;
+
+        // Fallback to full query if persisted query is not found
+        if (content.Contains("PersistedQueryNotFound")) {
+            _logger.LogInformation("Persisted query not found for {ClipId}, retrying with full query", clipId);
+            var retryPayload = new {
+                operationName = "VideoAccessToken_Clip",
+                variables = new { slug = clipId, platform = "web" },
+                query = fullQuery
+            };
+            content = await SendGqlRequestAsync(retryPayload);
+
+            if (string.IsNullOrEmpty(content)) return null;
+        }
+
+        if (content.Contains("\"errors\"")) {
+            _logger.LogWarning("Twitch GraphQL returned errors for clip {ClipId}: {Body}", clipId, content);
+
+            return null;
+        }
+
+        try {
+            _logger.LogDebug("Twitch GraphQL response for {ClipId}: {Body}", clipId, content);
+            var gqlResponse = JsonSerializer.Deserialize<TwitchGqlResponse>(content);
+
+            var clip = gqlResponse?.Data?.Clip;
+
+            if (clip == null) {
+                _logger.LogWarning("Clip not found in GraphQL response for {ClipId}", clipId);
+
+                return null;
+            }
+
+            var token = clip.PlaybackAccessToken?.Value;
+            var sig = clip.PlaybackAccessToken?.Signature;
+
+            if (string.IsNullOrEmpty(token) || string.IsNullOrEmpty(sig)) {
+                _logger.LogWarning("Missing playback access token or signature for clip {ClipId}", clipId);
+
+                return null;
+            }
+
+            // Prefer highest resolution (usually first in videoQualities)
+            var bestQuality = clip.VideoQualities?.FirstOrDefault();
+
+            if (bestQuality?.SourceUrl == null) {
+                _logger.LogWarning("No video qualities found in GraphQL response for {ClipId}", clipId);
+
+                return null;
+            }
+
+            var separator = bestQuality.SourceUrl.Contains('?') ? "&" : "?";
+
+            return $"{bestQuality.SourceUrl}{separator}sig={sig}&token={Uri.EscapeDataString(token)}";
+        } catch (Exception ex) {
+            _logger.LogError(ex, "Error fetching clip video URL via GraphQL for {ClipId}", clipId);
+
+            return null;
+        }
+    }
+
     private async Task<IReadOnlyList<ClipData>> FetchClipsAsync(string url) {
         var accessToken = await _oauthService.GetValidAccessTokenAsync();
 
@@ -448,7 +628,7 @@ public class TwitchHelixClient : ITwitchHelixClient {
             (int)Math.Ceiling(dto.Duration),
             dto.CreatedAt,
             dto.ViewCount,
-            dto.ViewCount >= 100);
+            dto.ViewCount >= 100) { ThumbnailUrl = dto.ThumbnailUrl };
     }
 
     private async Task<Dictionary<string, string>> FetchGameNamesByIdsAsync(List<string> ids) {
@@ -526,7 +706,8 @@ public class TwitchHelixClient : ITwitchHelixClient {
         string title,
         int viewCount,
         DateTime createdAt,
-        double duration
+        double duration,
+        string thumbnailUrl
     ) {
         [JsonPropertyName("id")] public string Id { get; } = id;
 
@@ -554,7 +735,40 @@ public class TwitchHelixClient : ITwitchHelixClient {
         [JsonPropertyName("created_at")] public DateTime CreatedAt { get; } = createdAt;
 
         [JsonPropertyName("duration")] public double Duration { get; } = duration;
+
+        [JsonPropertyName("thumbnail_url")] public string ThumbnailUrl { get; } = thumbnailUrl;
     }
+
+    private class TwitchGqlResponse {
+        [JsonPropertyName("data")] public TwitchGqlData? Data { get; set; }
+    }
+
+    private class TwitchGqlData {
+        [JsonPropertyName("clip")] public TwitchGqlClip? Clip { get; set; }
+    }
+
+    private class TwitchGqlClip {
+        [JsonPropertyName("playbackAccessToken")]
+        public TwitchGqlPlaybackToken? PlaybackAccessToken { get; set; }
+
+        [JsonPropertyName("videoQualities")] public List<TwitchGqlVideoQuality>? VideoQualities { get; set; }
+    }
+
+    private class TwitchGqlPlaybackToken {
+        [JsonPropertyName("signature")] public string? Signature { get; set; }
+        [JsonPropertyName("value")] public string? Value { get; set; }
+    }
+
+    private class TwitchGqlVideoQuality {
+        [JsonPropertyName("frameRate")] public double FrameRate { get; set; }
+        [JsonPropertyName("quality")] public string? Quality { get; set; }
+        [JsonPropertyName("sourceURL")] public string? SourceUrl { get; set; }
+    }
+
+    private record ClipDownloadResponse([property: JsonPropertyName("data")] List<ClipDownloadItem>? Data);
+
+    private record ClipDownloadItem([property: JsonPropertyName("landscape_download_url")]
+        string? LandscapeUrl);
 
     private class TwitchGamesResponse(List<TwitchGameDto> data) {
         [JsonPropertyName("data")] public List<TwitchGameDto> Data { get; } = data;

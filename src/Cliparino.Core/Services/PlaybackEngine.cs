@@ -14,7 +14,8 @@ public class PlaybackEngine(
     IObsController obsController,
     IOptionsMonitor<ObsOptions> obsOptions,
     ILogger<PlaybackEngine> logger,
-    IHealthReporter? healthReporter = null) : BackgroundService, IPlaybackEngine {
+    IHealthReporter? healthReporter = null,
+    ICefClickService? cefClickService = null) : BackgroundService, IPlaybackEngine {
     private readonly Dictionary<string, int> _clipFailureCount = new();
     private readonly Channel<PlaybackCommand> _commandChannel = Channel.CreateUnbounded<PlaybackCommand>();
     private readonly HashSet<string> _quarantinedClips = [];
@@ -109,10 +110,40 @@ public class PlaybackEngine(
         logger.LogInformation("Now playing: {ClipTitle} ({ClipUrl})", clip.Title, clip.Url);
 
         try {
-            if (obsController.IsConnected)
+            if (obsController.IsConnected) {
+                var opts = obsOptions.CurrentValue;
+
+                // 1. Ensure scene and source exist AND are nested in the current active scene
+                await obsController.EnsureClipSceneAndSourceExistsAsync(opts.SceneName, opts.SourceName,
+                    "http://localhost:5291", opts.Width, opts.Height);
+
+                // 2. Enforce audio configuration for both the browser source and the nested scene source
+                await obsController.EnsureInputAudioConfigAsync(opts.SourceName);
+                await obsController.EnsureInputAudioConfigAsync(opts.SceneName);
+
+                // 3. Show the clip
+                // ALWAYS ensure the browser source is visible in its own scene first,
+                // then toggle the container (if we are in another scene)
+                var clipScene = opts.SceneName.Trim();
+                var clipSource = opts.SourceName.Trim();
+                await obsController.SetSourceVisibilityAsync(clipScene, clipSource, true);
+
                 await SetObsSourceVisibilityAsync(true);
-            else
+
+                // Dispatch a trusted click into the browser source via CDP so the page has sticky
+                // user activation before the Twitch embed loads — prevents Twitch from auto-muting.
+                // We wait briefly to ensure the browser has processed the visibility change and started loading.
+                if (cefClickService != null) {
+                    await Task.Delay(500, cancellationToken);
+                    await cefClickService.SimulateClickAsync(cancellationToken);
+
+                    // Second click after a short delay to hit the Twitch iframe once it's likely initialized
+                    await Task.Delay(1000, cancellationToken);
+                    await cefClickService.SimulateClickAsync(cancellationToken);
+                }
+            } else {
                 logger.LogWarning("OBS is not connected. Skipping OBS updates for clip: {ClipTitle}", clip.Title);
+            }
 
             TransitionToState(PlaybackState.Playing, cancellationToken);
             clipQueue.SetLastPlayed(clip);
@@ -168,12 +199,32 @@ public class PlaybackEngine(
         await EnqueueNextIfAvailableAsync(cancellationToken);
     }
 
-    /// <summary>Shows or hides the Cliparino scene (used as a nested scene source) in the current scene.</summary>
-    /// <param name="visible">True to show the scene source, false to hide it.</param>
+    /// <summary>Shows or hides the Cliparino source in the active scene.</summary>
+    /// <param name="visible">True to show the source, false to hide it.</param>
     private async Task SetObsSourceVisibilityAsync(bool visible) {
         var currentScene = await obsController.GetCurrentSceneAsync();
-        if (!string.IsNullOrEmpty(currentScene))
-            await obsController.SetSourceVisibilityAsync(currentScene, obsOptions.CurrentValue.SceneName, visible);
+
+        if (string.IsNullOrEmpty(currentScene)) return;
+
+        var clipScene = obsOptions.CurrentValue.SceneName.Trim();
+        var clipSource = obsOptions.CurrentValue.SourceName.Trim();
+        var normalizedCurrentScene = currentScene.Trim();
+
+        // If we are currently in the dedicated Cliparino scene, toggle the browser source directly.
+        if (string.Equals(normalizedCurrentScene, clipScene, StringComparison.OrdinalIgnoreCase)) {
+            logger.LogInformation("Setting visibility for '{ClipSource}' to {Visible} in scene '{ClipScene}'",
+                clipSource, visible, clipScene);
+            await obsController.SetSourceVisibilityAsync(clipScene, clipSource, visible);
+        } else {
+            // Otherwise, toggle the nested scene source in whatever scene the streamer is currently using.
+            logger.LogInformation(
+                "Setting visibility for nested scene '{ClipScene}' to {Visible} in current scene '{CurrentScene}'",
+                clipScene, visible, normalizedCurrentScene);
+            await obsController.SetSourceVisibilityAsync(normalizedCurrentScene, clipScene, visible);
+
+            // If we are hiding, also hide the player source inside the Cliparino scene to be safe
+            if (!visible) await obsController.SetSourceVisibilityAsync(clipScene, clipSource, false);
+        }
     }
 
     /// <summary>Sends a Play command if the queue still has clips waiting.</summary>

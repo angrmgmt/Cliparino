@@ -1,5 +1,6 @@
 let currentClipId = null;
 let pollingInterval;
+let nudgeTimeout;
 
 const applySettings = async () => {
     try {
@@ -28,80 +29,164 @@ const pollStatus = async () => {
     }
 };
 
+const destroyPlayer = () => {
+    const container = document.getElementById('clip-player');
+    if (container) container.innerHTML = '';
+};
+
 const updateUI = (data) => {
     const playerContainer = document.getElementById('player-container');
     const idleContainer = document.getElementById('idle-container');
-    const iframe = document.getElementById('clip-iframe');
 
     if (data.state === 'Playing' || data.state === 'Loading' || data.state === 'Cooldown') {
-        // Bring player to front by hiding idle screen
         playerContainer.style.zIndex = '2';
         idleContainer.style.zIndex = '1';
         idleContainer.style.display = 'none';
+
+        if (nudgeTimeout) {
+            clearTimeout(nudgeTimeout);
+            nudgeTimeout = null;
+        }
 
         if (data.currentClip && data.currentClip.id !== currentClipId) {
             loadClip(data.currentClip);
         }
     } else {
-        // Show idle screen on top
         playerContainer.style.zIndex = '1';
         idleContainer.style.zIndex = '2';
         idleContainer.style.display = 'flex';
         currentClipId = null;
-        if (iframe.src !== 'about:blank') {
-            iframe.src = 'about:blank';
-        }
+        destroyPlayer();
     }
 };
 
-const loadClip = (clip) => {
+const loadClip = async (clip) => {
+    // Set immediately to block re-entrant calls from the polling loop
     currentClipId = clip.id;
-    const iframe = document.getElementById('clip-iframe');
+
     const streamerGame = document.getElementById('streamer-game');
     const clipTitle = document.getElementById('clip-title');
     const clipCreator = document.getElementById('clip-creator');
 
-    console.log(`[Cliparino] Loading clip:`, clip);
-    console.log(`[Cliparino] Duration: ${clip.durationSeconds}s`);
+    if (streamerGame) streamerGame.textContent = `${clip.broadcaster.display_name} doin' a heckin' ${clip.gameName} stream`;
+    if (clipTitle) clipTitle.textContent = clip.title;
+    if (clipCreator) clipCreator.textContent = `by ${clip.creator.display_name}`;
 
-    // Update text overlays
-    streamerGame.textContent = `${clip.broadcaster.display_name} doin' a heckin' ${clip.gameName} stream`;
-    clipTitle.textContent = clip.title;
-    clipCreator.textContent = `by ${clip.creator.display_name}`;
+    console.log(`[Cliparino] Loading clip ${clip.id} (${clip.durationSeconds}s)`);
 
-    // Build embed URL
-    const parents = ['localhost', '127.0.0.1', window.location.hostname];
-    const parentParams = parents.map(p => `parent=${p}`).join('&');
+    destroyPlayer();
 
-    // Unmuted autoplay - requires user interaction once per session
-    const embedUrl = `https://clips.twitch.tv/embed?clip=${clip.id}&autoplay=true&muted=false&${parentParams}`;
+    // Primary path: Twitch's own signed download URL (own clips only — falls through for shoutout clips)
+    let downloadUrl = null;
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2500);
+        const resp = await fetch(`/api/clip/${encodeURIComponent(clip.id)}/download-url`, {signal: controller.signal});
+        clearTimeout(timeoutId);
+        if (resp.ok) downloadUrl = (await resp.json()).url || null;
+    } catch (err) {
+        console.warn(`[Cliparino] Download URL fetch failed for ${clip.id}:`, err);
+    }
 
-    console.log(`[Cliparino] Embed URL: ${embedUrl}`);
-    iframe.src = embedUrl;
+    if (downloadUrl) {
+        console.log('[Cliparino] Using signed download URL');
+        appendVideoElement(downloadUrl, clip);
+        return;
+    }
+
+    // Secondary fallback: Try to derive direct URL from thumbnail (legacy hack)
+    if (clip.thumbnailUrl) {
+        const derivedUrl = clip.thumbnailUrl.replace(/-preview-\d+x\d+\.jpg$/, '.mp4');
+        if (derivedUrl !== clip.thumbnailUrl) {
+            console.log('[Cliparino] Using derived URL from thumbnail');
+            appendVideoElement(derivedUrl, clip);
+            return;
+        }
+    }
+
+    // Direct path failed or unavailable, go straight to iframe
+    console.log('[Cliparino] direct video URLs unavailable, using Twitch embed iframe');
+    appendClipIframe(clip);
 };
 
-// Apply settings on load and refresh every 30 seconds
+const appendVideoElement = (src, clip) => {
+    const video = document.createElement('video');
+    video.playsInline = true;
+    video.src = src;
+    video.id = 'video-element';
+    const playerDiv = document.getElementById('clip-player');
+    if (playerDiv) playerDiv.appendChild(video);
+
+    // Timeout to fallback to iframe if video fails to play/load
+    const videoTimeout = setTimeout(() => {
+        console.warn('[Cliparino] Video playback timed out after 3s, falling back to iframe');
+        destroyPlayer();
+        appendClipIframe(clip);
+    }, 3000);
+
+    video.addEventListener('playing', () => {
+        console.log('[Cliparino] Video playback started');
+        clearTimeout(videoTimeout);
+    }, {once: true});
+
+    video.addEventListener('error', (e) => {
+        clearTimeout(videoTimeout);
+        console.warn('[Cliparino] Video element error, falling back to iframe:', video.error);
+        destroyPlayer();
+        appendClipIframe(clip);
+    }, {once: true});
+
+    video.muted = false;
+    video.volume = 1.0;
+    video.play().catch((err) => {
+        console.warn('[Cliparino] Autoplay failed:', err);
+        if (!sessionStorage.getItem('cliparino_interacted')) {
+            const nudge = document.getElementById('interaction-nudge');
+            if (nudge) nudge.style.display = 'block';
+        }
+    });
+};
+
+const appendClipIframe = (clip) => {
+    // Twitch.Player SDK does not support the `clip` parameter — clips require the raw iframe embed.
+    const parents = [...new Set(['localhost', '127.0.0.1', window.location.hostname])];
+    const playerDiv = document.getElementById('clip-player');
+    if (!playerDiv) return;
+
+    playerDiv.innerHTML = '';
+
+    const iframe = document.createElement('iframe');
+    // Adding volume=1 and migration=true (skips content warnings) to improve reliability in OBS
+    iframe.src = `https://clips.twitch.tv/embed?clip=${clip.id}&parent=${parents.join('&parent=')}&autoplay=true&muted=false&volume=1&migration=true`;
+    iframe.allow = 'autoplay; fullscreen';
+    iframe.style.cssText = 'width:100%;height:100%;border:none;';
+    playerDiv.appendChild(iframe);
+
+    // Bonus attempt: unmute directly if OBS CEF permits cross-origin access
+    iframe.addEventListener('load', () => {
+        try {
+            // Some versions of the player respond to postMessage for unmuting
+            iframe.contentWindow.postMessage({method: 'setMuted', args: [false]}, '*');
+            iframe.contentWindow.postMessage({method: 'setVolume', args: [1.0]}, '*');
+
+            const video = iframe.contentWindow.document.querySelector('video');
+            if (video) {
+                video.muted = false;
+                video.volume = 1.0;
+            }
+        } catch (_) {
+        }
+    });
+};
+
 applySettings();
 setInterval(applySettings, 30000);
 
-// Initial poll and start interval
 pollStatus();
 pollingInterval = setInterval(pollStatus, 1000);
 
-// Interaction nudge handling
 document.body.addEventListener('click', () => {
-    console.log('[Cliparino] User interaction detected');
+    sessionStorage.setItem('cliparino_interacted', 'true');
     const nudge = document.getElementById('interaction-nudge');
     if (nudge) nudge.style.display = 'none';
 });
-
-// Show nudge if we detect we're in OBS, and it's been a while without interaction
-if (window.obsstudio) {
-    setTimeout(() => {
-        const nudge = document.getElementById('interaction-nudge');
-        const idleContainer = document.getElementById('idle-container');
-        if (nudge && idleContainer && idleContainer.style.display !== 'none') {
-            nudge.style.display = 'block';
-        }
-    }, 5000);
-}

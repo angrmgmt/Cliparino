@@ -90,7 +90,8 @@ public class TwitchOAuthService : ITwitchOAuthService {
                 state, _pendingAuthFlows.Count);
 
             var scopes = new[] {
-                "user:read:email", "user:read:chat", "chat:read", "chat:edit", "moderator:manage:shoutouts"
+                "user:read:email", "user:read:chat", "chat:read", "chat:edit", "moderator:manage:shoutouts",
+                "channel:manage:clips"
             };
 
             var authUrl = $"https://id.twitch.tv/oauth2/authorize?" +

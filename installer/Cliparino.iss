@@ -2,7 +2,7 @@
 ; https://jrsoftware.org/isinfo.php
 
 #define MyAppName "Cliparino"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "2.0.0 "
 #define MyAppPublisher "angrmgmt"
 #define MyAppURL "https://github.com/angrmgmt/Cliparino"
 #define MyAppExeName "Cliparino.Core.exe"
@@ -49,7 +49,7 @@ Name: "firewall"; Description: "Allow {#MyAppName} through Windows Firewall"; Gr
 ; Main executable (self-contained)
 Source: "..\src\Cliparino.Core\bin\Release\net8.0-windows\win-x64\publish\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 ; Configuration file
-Source: "..\src\Cliparino.Core\bin\Release\net8.0-windows\win-x64\publish\appsettings.json"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist
+Source: "..\src\Cliparino.Core\bin\Release\net8.0-windows\win-x64\publish\appsettings.json"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist uninsneveruninstall
 ; Web assets
 Source: "..\src\Cliparino.Core\bin\Release\net8.0-windows\win-x64\publish\wwwroot\*"; DestDir: "{app}\wwwroot"; Flags: ignoreversion recursesubdirs createallsubdirs
 
@@ -76,6 +76,9 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 Type: filesandordirs; Name: "{app}\logs"
 
 [Code]
+var
+  KeepConfig: Boolean;
+
 // Add Windows Firewall rules for Cliparino
 procedure AddFirewallRules();
 var
@@ -129,6 +132,16 @@ var
   ResultCode: Integer;
 begin
   Result := True;
+
+  // Ask user about keeping configuration early
+  if MsgBox('Do you want to keep your configuration file (appsettings.json)?', mbConfirmation, MB_YESNO) = IDYES then
+  begin
+    KeepConfig := True;
+  end else
+  begin
+    KeepConfig := False;
+  end;
+
   // Try to find running process
   if Exec('tasklist', '/FI "IMAGENAME eq {#MyAppExeName}" /NH', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
   begin
@@ -147,9 +160,53 @@ begin
   
   if CurUninstallStep = usPostUninstall then
   begin
-    if MsgBox('Do you want to keep your configuration file (appsettings.json)?', mbConfirmation, MB_YESNO) = IDNO then
+    if not KeepConfig then
     begin
       DeleteFile(ExpandConstant('{app}\appsettings.json'));
     end;
   end;
 end;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -294,17 +294,22 @@ public class ObsController : IObsController, IDisposable {
                 var settings = _obs.GetInputSettings(sourceName);
 
                 var actualUrl = settings.Settings["url"]?.ToString() ?? "";
-                var actualWidth = settings.Settings["width"]?.ToObject<int>() ?? 0;
-                var actualHeight = settings.Settings["height"]?.ToObject<int>() ?? 0;
+                var actualWidth = settings.Settings["width"] != null ? Convert.ToInt32(settings.Settings["width"]) : 0;
+                var actualHeight = settings.Settings["height"] != null
+                    ? Convert.ToInt32(settings.Settings["height"])
+                    : 0;
 
-                var urlDrift = actualUrl != expectedUrl;
+                var urlDrift = !string.Equals(actualUrl.TrimEnd('/'), expectedUrl.TrimEnd('/'),
+                    StringComparison.OrdinalIgnoreCase);
                 var widthDrift = actualWidth != expectedWidth;
                 var heightDrift = actualHeight != expectedHeight;
 
                 if (urlDrift || widthDrift || heightDrift) {
                     _logger.LogWarning(
-                        "Configuration drift detected for source '{SourceName}': URL={UrlDrift}, Width={WidthDrift}, Height={HeightDrift}",
-                        sourceName, urlDrift, widthDrift, heightDrift);
+                        "Configuration drift detected for source '{SourceName}': URL={UrlDrift} (Actual='{ActualUrl}', Expected='{ExpectedUrl}'), Width={WidthDrift} (Actual={ActualWidth}, Expected={ExpectedWidth}), Height={HeightDrift} (Actual={ActualHeight}, Expected={ExpectedHeight})",
+                        sourceName, urlDrift, actualUrl, expectedUrl, widthDrift, actualWidth, expectedWidth,
+                        heightDrift,
+                        actualHeight, expectedHeight);
 
                     return true;
                 }
@@ -348,6 +353,44 @@ public class ObsController : IObsController, IDisposable {
             _logger.LogError(ex, "Failed to repair configuration drift");
 
             return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task EnsureInputAudioConfigAsync(string inputName) {
+        if (!IsConnected) {
+            _logger.LogWarning("Cannot ensure audio config: Not connected to OBS");
+
+            return;
+        }
+
+        try {
+            await Task.Run(() => {
+                _logger.LogInformation("Ensuring audio configuration for input '{InputName}'", inputName);
+
+                // For scenes used as sources, SetInputMute will throw because they aren't "inputs".
+                // We check if it exists in the input list first.
+                var inputs = _obs.GetInputList();
+                var isInput = inputs.Any(i => i.InputName == inputName);
+
+                if (isInput) {
+                    // Ensure unmuted
+                    _obs.SetInputMute(inputName, false);
+
+                    // Ensure volume is at 100% (1.0 multiplier)
+                    _obs.SetInputVolume(inputName, 1.0f);
+
+                    // Ensure monitoring is enabled so the streamer can hear it
+                    _obs.SetInputAudioMonitorType(inputName, "OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT");
+
+                    _logger.LogInformation("Audio configuration for input '{InputName}' enforced", inputName);
+                } else {
+                    _logger.LogDebug("Skipping audio configuration for '{InputName}': source is not an input",
+                        inputName);
+                }
+            });
+        } catch (Exception ex) {
+            _logger.LogError(ex, "Failed to ensure audio configuration for input '{InputName}'", inputName);
         }
     }
 

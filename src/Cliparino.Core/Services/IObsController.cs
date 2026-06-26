@@ -205,6 +205,19 @@ public interface IObsController {
         int expectedHeight);
 
     /// <summary>
+    ///     Ensures that an input's audio is unmuted, volume is at 100%, and monitoring is enabled.
+    /// </summary>
+    /// <param name="inputName">The name of the input to configure</param>
+    /// <returns>A task representing the async operation</returns>
+    /// <remarks>
+    ///     This method enforces desired-state for audio:
+    ///     - Unmutes the input
+    ///     - Sets volume to 0dB (100%)
+    ///     - Sets monitoring to "Monitor and Output" so the streamer can hear the clips
+    /// </remarks>
+    Task EnsureInputAudioConfigAsync(string inputName);
+
+    /// <summary>
     ///     Gets the name of the currently active scene in OBS.
     /// </summary>
     /// <returns>

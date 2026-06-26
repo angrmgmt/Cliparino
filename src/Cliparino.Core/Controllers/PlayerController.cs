@@ -75,6 +75,38 @@ public class PlayerController : ControllerBase {
     }
 
     /// <summary>
+    ///     Returns a time-limited signed download URL for the specified clip, obtained from the Twitch
+    ///     <c>GET /helix/clips/download</c> endpoint (GA 2025-10-30).
+    /// </summary>
+    /// <param name="clipId">The Twitch clip slug.</param>
+    /// <returns>
+    ///     <c>200 OK</c> with <c>{ "url": "..." }</c> on success;
+    ///     <c>503</c> when the Twitch client is unavailable;
+    ///     <c>404</c> when no URL could be obtained (not authenticated, or clip not found).
+    /// </returns>
+    [HttpGet("clip/{clipId}/download-url")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetClipDownloadUrl(string clipId) {
+        if (_helixClient == null)
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "Twitch client not available");
+
+        // Try the official Helix downloads API first (only works for own clips/editor perms)
+        var url = await _helixClient.GetClipDownloadUrlAsync(clipId);
+
+        // Fall back to the GraphQL "hack" for clips from other broadcasters (e.g. shoutouts)
+        if (string.IsNullOrEmpty(url)) {
+            _logger.LogInformation("Helix download URL unavailable for {ClipId}, falling back to GraphQL", clipId);
+            url = await _helixClient.GetClipVideoUrlGqlAsync(clipId);
+        }
+
+        if (url == null) return NotFound();
+
+        return Ok(new { url });
+    }
+
+    /// <summary>
     ///     Returns the current player style settings (colors, font, dimensions) so the browser player can apply them.
     /// </summary>
     [HttpGet("settings")]

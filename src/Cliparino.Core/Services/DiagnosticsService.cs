@@ -185,7 +185,7 @@ public partial class DiagnosticsService : IDiagnosticsService {
     /// <returns>Formatted text containing recent log entries or an error message if logs are unavailable.</returns>
     private async Task<string> GetRecentLogsAsync(CancellationToken cancellationToken) {
         try {
-            var logsPath = Path.Combine(Directory.GetCurrentDirectory(), "logs");
+            var logsPath = Path.Combine(AppContext.BaseDirectory, "logs");
 
             if (!Directory.Exists(logsPath)) return "No log files found";
 
@@ -200,10 +200,20 @@ public partial class DiagnosticsService : IDiagnosticsService {
 
             foreach (var logFile in logFiles) {
                 sb.AppendLine($"--- {Path.GetFileName(logFile)} ---");
-                var lines = await File.ReadAllLinesAsync(logFile, cancellationToken);
+
+                string content;
+
+                using (var stream = new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var reader = new StreamReader(stream)) {
+                    content = await reader.ReadToEndAsync(cancellationToken);
+                }
+
+                var lines = content.Split(new[] { Environment.NewLine, "\n", "\r" }, StringSplitOptions.None);
                 var recentLines = lines.TakeLast(100);
 
-                foreach (var line in recentLines) sb.AppendLine(RedactSensitiveData(line));
+                foreach (var line in recentLines)
+                    if (!string.IsNullOrWhiteSpace(line))
+                        sb.AppendLine(RedactSensitiveData(line));
                 sb.AppendLine();
             }
 
@@ -223,7 +233,7 @@ public partial class DiagnosticsService : IDiagnosticsService {
     /// <remarks>Adds up to 3 most recent log files under a "logs/" directory in the archive.</remarks>
     private async Task AddRecentLogFilesAsync(ZipArchive archive, CancellationToken cancellationToken) {
         try {
-            var logsPath = Path.Combine(Directory.GetCurrentDirectory(), "logs");
+            var logsPath = Path.Combine(AppContext.BaseDirectory, "logs");
 
             if (!Directory.Exists(logsPath))
                 return;
@@ -240,7 +250,13 @@ public partial class DiagnosticsService : IDiagnosticsService {
                 await using var entryStream = entry.Open();
                 await using var writer = new StreamWriter(entryStream);
 
-                var content = await File.ReadAllTextAsync(logFile, cancellationToken);
+                string content;
+
+                using (var stream = new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var reader = new StreamReader(stream)) {
+                    content = await reader.ReadToEndAsync(cancellationToken);
+                }
+
                 await writer.WriteAsync(RedactSensitiveData(content));
             }
         } catch (Exception ex) {

@@ -153,12 +153,12 @@ public static class ConfigurationHelper {
   },
   ""OBS"": {
     ""Host"": ""localhost"",
-    ""Port"": ""4455"",
+    ""Port"": 4455,
     ""Password"": """",
     ""SceneName"": ""Cliparino"",
     ""SourceName"": ""CliparinoPlayer"",
-    ""Width"": ""1920"",
-    ""Height"": ""1080""
+    ""Width"": 1920,
+    ""Height"": 1080
   },
   ""Player"": {
     ""Url"": ""http://localhost:5291""

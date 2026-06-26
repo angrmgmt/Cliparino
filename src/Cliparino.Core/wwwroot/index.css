@@ -73,14 +73,26 @@ body {
 
 .iframe-container {
     flex: 1;
-    position: relative;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
     background-color: black;
 }
 
-#clip-iframe {
+#clip-player {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+#clip-player video,
+#clip-player iframe {
+    flex: 1;
+    min-height: 0;
     width: 100%;
-    height: 100%;
     border: none;
+    display: block;
 }
 
 .info-bottom {
