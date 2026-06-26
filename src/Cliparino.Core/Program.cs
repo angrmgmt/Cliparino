@@ -28,6 +28,17 @@ Log.Logger = new LoggerConfiguration()
     .WriteTo.Console()
     .CreateBootstrapLogger();
 
+using var mutex = new Mutex(true, "CliparinoCoreMutex", out var createdNew);
+
+if (!createdNew) {
+    MessageBox.Show("Cliparino is already running.\n\nPlease check the system tray.",
+        "Already Running",
+        MessageBoxButtons.OK,
+        MessageBoxIcon.Information);
+
+    return;
+}
+
 Console.WriteLine("Cliparino starting...");
 Console.WriteLine($"Base directory: {AppContext.BaseDirectory}");
 Console.WriteLine($"Logs directory: {logsDir}");

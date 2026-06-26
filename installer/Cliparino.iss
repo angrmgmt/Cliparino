@@ -2,7 +2,7 @@
 ; https://jrsoftware.org/isinfo.php
 
 #define MyAppName "Cliparino"
-#define MyAppVersion "2.0.0 "
+#define MyAppVersion "2.1.0 "
 #define MyAppPublisher "angrmgmt"
 #define MyAppURL "https://github.com/angrmgmt/Cliparino"
 #define MyAppExeName "Cliparino.Core.exe"
@@ -33,6 +33,10 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 ; Privileges
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
+; Auto-close and restart
+CloseApplications=yes
+RestartApplications=yes
+AppMutex=CliparinoCoreMutex
 ; Architecture
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -166,6 +170,7 @@ begin
     end;
   end;
 end;
+
 
 
 

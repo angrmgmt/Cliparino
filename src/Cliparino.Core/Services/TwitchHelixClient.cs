@@ -5,6 +5,8 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Cliparino.Core.Models;
 
+// ReSharper disable ClassNeverInstantiated.Local
+
 namespace Cliparino.Core.Services;
 
 /// <summary>
@@ -19,7 +21,7 @@ namespace Cliparino.Core.Services;
 ///         <strong>Key features:</strong><br />
 ///         - Automatic Bearer token injection via <see cref="ITwitchOAuthService" /><br />
 ///         - Retry logic with exponential backoff for transient failures (429, 5xx)<br />
-///         - Rate limit handling (respects 429 Retry-After header)<br />
+///         - Rate limit handling (respects error 429 Retry-After header)<br />
 ///         - Multiple clip URL format parsing (clips.twitch.tv and twitch.tv/user/clip/)<br />
 ///         - JSON deserialization of Helix API responses
 ///     </para>
@@ -49,7 +51,7 @@ public class TwitchHelixClient : ITwitchHelixClient {
     /// <summary>
     ///     Initializes a new instance of <see cref="TwitchHelixClient" />.
     /// </summary>
-    /// <param name="oauthService">OAuth service used to obtain and refresh access tokens.</param>
+    /// <param name="oauthService">OAuth service used to get and refresh access tokens.</param>
     /// <param name="logger">Structured logger for diagnostics and error reporting.</param>
     /// <param name="httpClientFactory">Factory for creating named <c>"Twitch"</c> HTTP clients.</param>
     /// <param name="configuration">Application configuration; must contain <c>Twitch:ClientId</c>.</param>
@@ -78,13 +80,10 @@ public class TwitchHelixClient : ITwitchHelixClient {
             var url = $"https://api.twitch.tv/helix/clips?id={clipId}";
             var clips = await FetchClipsAsync(url);
 
-            if (clips.Count == 0) {
-                _logger.LogWarning("Clip not found: {ClipId}", clipId);
+            if (clips.Count != 0) return clips[0];
+            _logger.LogWarning("Clip not found: {ClipId}", clipId);
 
-                return null;
-            }
-
-            return clips[0];
+            return null;
         } catch (Exception ex) {
             _logger.LogError(ex, "Failed to fetch clip by ID: {ClipId}", clipId);
 
@@ -102,13 +101,10 @@ public class TwitchHelixClient : ITwitchHelixClient {
 
         var clipId = ExtractClipIdFromUrl(clipUrl);
 
-        if (string.IsNullOrEmpty(clipId)) {
-            _logger.LogWarning("Could not extract clip ID from URL: {Url}", clipUrl);
+        if (!string.IsNullOrEmpty(clipId)) return await GetClipByIdAsync(clipId);
+        _logger.LogWarning("Could not extract clip ID from URL: {Url}", clipUrl);
 
-            return null;
-        }
-
-        return await GetClipByIdAsync(clipId);
+        return null;
     }
 
     /// <inheritdoc />
@@ -168,13 +164,10 @@ public class TwitchHelixClient : ITwitchHelixClient {
             var content = await response.Content.ReadAsStringAsync();
             var apiResponse = JsonSerializer.Deserialize<TwitchUsersResponse>(content);
 
-            if (apiResponse?.Data == null || apiResponse.Data.Count == 0) {
-                _logger.LogWarning("User not found: {BroadcasterName}", broadcasterName);
+            if (apiResponse?.Data != null && apiResponse.Data.Count != 0) return apiResponse.Data[0].Id;
+            _logger.LogWarning("User not found: {BroadcasterName}", broadcasterName);
 
-                return null;
-            }
-
-            return apiResponse.Data[0].Id;
+            return null;
         } catch (Exception ex) {
             _logger.LogError(ex, "Failed to get broadcaster ID for: {BroadcasterName}", broadcasterName);
 
@@ -185,7 +178,7 @@ public class TwitchHelixClient : ITwitchHelixClient {
     /// <inheritdoc />
     public async Task<string?> GetAuthenticatedUserIdAsync() {
         try {
-            var url = "https://api.twitch.tv/helix/users";
+            const string url = "https://api.twitch.tv/helix/users";
             var accessToken = await _oauthService.GetValidAccessTokenAsync();
 
             if (string.IsNullOrEmpty(accessToken)) {
@@ -204,13 +197,10 @@ public class TwitchHelixClient : ITwitchHelixClient {
             var content = await response.Content.ReadAsStringAsync();
             var apiResponse = JsonSerializer.Deserialize<TwitchUsersResponse>(content);
 
-            if (apiResponse?.Data == null || apiResponse.Data.Count == 0) {
-                _logger.LogWarning("Could not get authenticated user info");
+            if (apiResponse?.Data != null && apiResponse.Data.Count != 0) return apiResponse.Data[0].Id;
+            _logger.LogWarning("Could not get authenticated user info");
 
-                return null;
-            }
-
-            return apiResponse.Data[0].Id;
+            return null;
         } catch (Exception ex) {
             _logger.LogError(ex, "Failed to get authenticated user ID");
 
@@ -271,7 +261,7 @@ public class TwitchHelixClient : ITwitchHelixClient {
         }
 
         try {
-            var url = "https://api.twitch.tv/helix/chat/messages";
+            const string url = "https://api.twitch.tv/helix/chat/messages";
             var accessToken = await _oauthService.GetValidAccessTokenAsync();
 
             if (string.IsNullOrEmpty(accessToken)) {
@@ -365,7 +355,7 @@ public class TwitchHelixClient : ITwitchHelixClient {
             return null;
         }
 
-        // Get clip info to obtain broadcaster_id
+        // Get clip info to get broadcaster_id
         var clip = await GetClipByIdAsync(clipId);
 
         if (clip == null) {
@@ -671,111 +661,73 @@ public class TwitchHelixClient : ITwitchHelixClient {
         return result;
     }
 
-    private class TwitchClipsResponse(List<TwitchClipDto> data) {
-        [JsonPropertyName("data")] public List<TwitchClipDto> Data { get; } = data;
-    }
+    private record TwitchClipsResponse([property: JsonPropertyName("data")] List<TwitchClipDto> Data);
 
-    private class TwitchUsersResponse(List<TwitchUserDto> data) {
-        [JsonPropertyName("data")] public List<TwitchUserDto> Data { get; } = data;
-    }
+    private record TwitchUsersResponse([property: JsonPropertyName("data")] List<TwitchUserDto> Data);
 
-    private class TwitchUserDto(string id) {
-        [JsonPropertyName("id")] public string Id { get; } = id;
-    }
+    private record TwitchUserDto([property: JsonPropertyName("id")] string Id);
 
-    private class TwitchChannelsResponse(List<TwitchChannelDto> data) {
-        [JsonPropertyName("data")] public List<TwitchChannelDto> Data { get; } = data;
-    }
+    private record TwitchChannelsResponse([property: JsonPropertyName("data")] List<TwitchChannelDto> Data);
 
-    private class TwitchChannelDto(string broadcasterName, string gameName) {
-        [JsonPropertyName("broadcaster_name")] public string BroadcasterName { get; } = broadcasterName;
+    private record TwitchChannelDto(
+        [property: JsonPropertyName("broadcaster_name")]
+        string BroadcasterName,
+        [property: JsonPropertyName("game_name")]
+        string GameName);
 
-        [JsonPropertyName("game_name")] public string GameName { get; } = gameName;
-    }
+    private record TwitchClipDto(
+        [property: JsonPropertyName("id")] string Id,
+        [property: JsonPropertyName("url")] string Url,
+        [property: JsonPropertyName("broadcaster_id")]
+        string BroadcasterId,
+        [property: JsonPropertyName("broadcaster_login")]
+        string BroadcasterLogin,
+        [property: JsonPropertyName("broadcaster_name")]
+        string BroadcasterName,
+        [property: JsonPropertyName("creator_id")]
+        string CreatorId,
+        [property: JsonPropertyName("creator_login")]
+        string CreatorLogin,
+        [property: JsonPropertyName("creator_name")]
+        string CreatorName,
+        [property: JsonPropertyName("game_id")]
+        string GameId,
+        [property: JsonPropertyName("title")] string Title,
+        [property: JsonPropertyName("view_count")]
+        int ViewCount,
+        [property: JsonPropertyName("created_at")]
+        DateTime CreatedAt,
+        [property: JsonPropertyName("duration")]
+        double Duration,
+        [property: JsonPropertyName("thumbnail_url")]
+        string ThumbnailUrl);
 
-    private class TwitchClipDto(
-        string id,
-        string url,
-        string broadcasterId,
-        string broadcasterLogin,
-        string broadcasterName,
-        string creatorId,
-        string creatorLogin,
-        string creatorName,
-        string gameId,
-        string title,
-        int viewCount,
-        DateTime createdAt,
-        double duration,
-        string thumbnailUrl
-    ) {
-        [JsonPropertyName("id")] public string Id { get; } = id;
+    private record TwitchGqlResponse([property: JsonPropertyName("data")] TwitchGqlData? Data);
 
-        [JsonPropertyName("url")] public string Url { get; } = url;
+    private record TwitchGqlData([property: JsonPropertyName("clip")] TwitchGqlClip? Clip);
 
-        [JsonPropertyName("broadcaster_id")] public string BroadcasterId { get; } = broadcasterId;
+    private record TwitchGqlClip(
+        [property: JsonPropertyName("playbackAccessToken")]
+        TwitchGqlPlaybackToken? PlaybackAccessToken,
+        [property: JsonPropertyName("videoQualities")]
+        List<TwitchGqlVideoQuality>? VideoQualities);
 
-        [JsonPropertyName("broadcaster_login")]
-        public string BroadcasterLogin { get; } = broadcasterLogin;
+    private record TwitchGqlPlaybackToken(
+        [property: JsonPropertyName("signature")]
+        string? Signature,
+        [property: JsonPropertyName("value")] string? Value);
 
-        [JsonPropertyName("broadcaster_name")] public string BroadcasterName { get; } = broadcasterName;
-
-        [JsonPropertyName("creator_id")] public string CreatorId { get; } = creatorId;
-
-        [JsonPropertyName("creator_login")] public string CreatorLogin { get; } = creatorLogin;
-
-        [JsonPropertyName("creator_name")] public string CreatorName { get; } = creatorName;
-
-        [JsonPropertyName("game_id")] public string GameId { get; } = gameId;
-
-        [JsonPropertyName("title")] public string Title { get; } = title;
-
-        [JsonPropertyName("view_count")] public int ViewCount { get; } = viewCount;
-
-        [JsonPropertyName("created_at")] public DateTime CreatedAt { get; } = createdAt;
-
-        [JsonPropertyName("duration")] public double Duration { get; } = duration;
-
-        [JsonPropertyName("thumbnail_url")] public string ThumbnailUrl { get; } = thumbnailUrl;
-    }
-
-    private class TwitchGqlResponse {
-        [JsonPropertyName("data")] public TwitchGqlData? Data { get; set; }
-    }
-
-    private class TwitchGqlData {
-        [JsonPropertyName("clip")] public TwitchGqlClip? Clip { get; set; }
-    }
-
-    private class TwitchGqlClip {
-        [JsonPropertyName("playbackAccessToken")]
-        public TwitchGqlPlaybackToken? PlaybackAccessToken { get; set; }
-
-        [JsonPropertyName("videoQualities")] public List<TwitchGqlVideoQuality>? VideoQualities { get; set; }
-    }
-
-    private class TwitchGqlPlaybackToken {
-        [JsonPropertyName("signature")] public string? Signature { get; set; }
-        [JsonPropertyName("value")] public string? Value { get; set; }
-    }
-
-    private class TwitchGqlVideoQuality {
-        [JsonPropertyName("frameRate")] public double FrameRate { get; set; }
-        [JsonPropertyName("quality")] public string? Quality { get; set; }
-        [JsonPropertyName("sourceURL")] public string? SourceUrl { get; set; }
-    }
+    private record TwitchGqlVideoQuality([property: JsonPropertyName("sourceURL")]
+        string? SourceUrl);
 
     private record ClipDownloadResponse([property: JsonPropertyName("data")] List<ClipDownloadItem>? Data);
 
     private record ClipDownloadItem([property: JsonPropertyName("landscape_download_url")]
         string? LandscapeUrl);
 
-    private class TwitchGamesResponse(List<TwitchGameDto> data) {
-        [JsonPropertyName("data")] public List<TwitchGameDto> Data { get; } = data;
-    }
+    private record TwitchGamesResponse([property: JsonPropertyName("data")] List<TwitchGameDto> Data);
 
-    private class TwitchGameDto(string id, string name) {
-        [JsonPropertyName("id")] public string Id { get; } = id;
-        [JsonPropertyName("name")] public string Name { get; } = name;
-    }
+    private record TwitchGameDto(
+        [property: JsonPropertyName("id")] string Id,
+        [property: JsonPropertyName("name")] string Name);
 }

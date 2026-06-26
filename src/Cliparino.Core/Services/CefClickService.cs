@@ -88,25 +88,6 @@ public class CefClickService(
         await ws.ReceiveAsync(buf, ct);
     }
 
-    private static async Task SendKeyEventAsync(ClientWebSocket ws, int id, string type, string key, int keyCode,
-        CancellationToken ct) {
-        var msg = JsonSerializer.Serialize(new {
-            id,
-            method = "Input.dispatchKeyEvent",
-            @params = new {
-                type,
-                key,
-                code = $"Key{key.ToUpperInvariant()}",
-                windowsVirtualKeyCode = keyCode,
-                nativeVirtualKeyCode = keyCode
-            }
-        });
-        await ws.SendAsync(Encoding.UTF8.GetBytes(msg), WebSocketMessageType.Text, true, ct);
-
-        var buf = new byte[512];
-        await ws.ReceiveAsync(buf, ct);
-    }
-
     private async Task<List<string>> GetAllTargetDebuggerUrlsAsync(CancellationToken ct) {
         try {
             var http = httpClientFactory.CreateClient();
